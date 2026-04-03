@@ -26,6 +26,10 @@ pub struct CliConfig {
     /// Disable directory listing
     #[arg(long)]
     pub no_index: bool,
+
+    /// Print usage examples and exit
+    #[arg(long)]
+    pub examples: bool,
 }
 
 impl CliConfig {
