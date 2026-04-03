@@ -72,6 +72,10 @@ pub async fn handle_request(
                 let realm = htaccess.auth_name.as_deref().unwrap_or("Restricted");
                 return auth_challenge_response(realm);
             }
+        } else {
+            // auth_required but no AuthUserFile configured — deny access
+            eprintln!("[auth] auth_required but no AuthUserFile configured, denying access");
+            return error_response(403, "Forbidden");
         }
     }
 
@@ -181,6 +185,15 @@ async fn serve_static_file(
 
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let content_type = mime_for_ext_owned(ext, &htaccess.add_types);
+    let content_type = if let Some(charset) = &htaccess.add_default_charset {
+        if !content_type.contains("charset") {
+            format!("{}; charset={}", content_type, charset)
+        } else {
+            content_type
+        }
+    } else {
+        content_type
+    };
 
     // Range request
     if let Some(range_header) = req_headers.get(header::RANGE) {
@@ -232,10 +245,7 @@ async fn run_cgi_handler(
     let remote_addr = "127.0.0.1";
     let content_type = req_headers.get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    let content_length_val: usize = req_headers.get(header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    let content_length = stdin_body.len();
 
     let mut http_headers: HashMap<String, String> = HashMap::new();
     for (k, v) in req_headers.iter() {
@@ -245,7 +255,7 @@ async fn run_cgi_handler(
     }
 
     let port_str = state.config.port.to_string();
-    let content_length_str = content_length_val.to_string();
+    let content_length_str = content_length.to_string();
 
     let env_vars = build_cgi_env(
         method,
