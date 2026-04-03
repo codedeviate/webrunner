@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.7"
-axum-server = { version = "0.5", features = ["tls-rustls"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 rcgen = "0.13"
@@ -21,7 +21,6 @@ md-5 = "0.10"
 sha1 = "0.10"
 base64 = "0.22"
 http-body-util = "0.1"
-hyper = { version = "1", features = ["full"] }
 tower = "0.4"
 bytes = "1"
 
