@@ -138,6 +138,10 @@ pub async fn run_cgi(
     cmd.arg(script_path);
     cmd.current_dir(script_dir);
     cmd.env_clear();
+    // Preserve PATH so interpreters can be located
+    if let Ok(path) = std::env::var("PATH") {
+        cmd.env("PATH", path);
+    }
     for (key, value) in &env_vars {
         cmd.env(key, value);
     }
