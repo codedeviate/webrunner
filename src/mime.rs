@@ -1,0 +1,1 @@
+// MIME type detection
