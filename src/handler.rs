@@ -28,17 +28,24 @@ pub async fn handle_request(
     State(state): State<AppState>,
     req: Request<Body>,
 ) -> Response<Body> {
-    let method = req.method().to_string();
-    let uri = req.uri().clone();
+    let (parts, body) = req.into_parts();
+    let method = parts.method.to_string();
+    let uri = parts.uri.clone();
     let path_str = uri.path();
     let query = uri.query().unwrap_or("");
-    let req_headers = req.headers().clone();
+    let req_headers = parts.headers.clone();
+
+    // Collect request body bytes (for CGI POST)
+    use http_body_util::BodyExt;
+    let body_bytes: Vec<u8> = body.collect().await
+        .map(|c| c.to_bytes().to_vec())
+        .unwrap_or_default();
 
     // Resolve filesystem path (prevent path traversal)
     let rel_path = path_str.trim_start_matches('/');
     let fs_path = match safe_join(&state.root, rel_path) {
         Some(p) => p,
-        None => return error_response(400, "Bad Request", None),
+        None => return error_response(400, "Bad Request"),
     };
 
     // Determine the directory for .htaccess loading
@@ -81,14 +88,14 @@ pub async fn handle_request(
             let new_rel = new_path.trim_start_matches('/');
             let new_fs = match safe_join(&state.root, new_rel) {
                 Some(p) => p,
-                None => return error_response(400, "Bad Request", None),
+                None => return error_response(400, "Bad Request"),
             };
-            return serve_path(&state, &new_fs, &new_path, query, &method, &req_headers, &htaccess).await;
+            return serve_path(&state, &new_fs, &new_path, query, &method, &req_headers, &htaccess, body_bytes).await;
         }
         RewriteResult::None => {}
     }
 
-    serve_path(&state, &fs_path, path_str, query, &method, &req_headers, &htaccess).await
+    serve_path(&state, &fs_path, path_str, query, &method, &req_headers, &htaccess, body_bytes).await
 }
 
 async fn serve_path(
@@ -99,13 +106,14 @@ async fn serve_path(
     method: &str,
     req_headers: &HeaderMap,
     htaccess: &crate::htaccess::HtaccessConfig,
+    body_bytes: Vec<u8>,
 ) -> Response<Body> {
     // Directory handling
     if fs_path.is_dir() {
         if let Some(index_path) = resolve_index(fs_path, &htaccess.directory_index) {
             let ext = index_path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if is_cgi_ext(ext) {
-                return run_cgi_handler(state, &index_path, ext, req_path, query, method, req_headers).await;
+                return run_cgi_handler(state, &index_path, ext, req_path, query, method, req_headers, body_bytes).await;
             } else {
                 return serve_static_file(state, &index_path, req_path, req_headers, htaccess).await;
             }
@@ -124,26 +132,23 @@ async fn serve_path(
                 }
                 Err(e) => {
                     eprintln!("[static] directory listing error: {}", e);
-                    return error_response(500, "Internal Server Error",
-                        htaccess.error_documents.get(&500).map(|s| s.as_str()));
+                    return error_response(500, "Internal Server Error");
                 }
             }
         } else {
-            return error_response(403, "Forbidden",
-                htaccess.error_documents.get(&403).map(|s| s.as_str()));
+            return error_response(403, "Forbidden");
         }
     }
 
     // CGI script
     let ext = fs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if is_cgi_ext(ext) {
-        return run_cgi_handler(state, fs_path, ext, req_path, query, method, req_headers).await;
+        return run_cgi_handler(state, fs_path, ext, req_path, query, method, req_headers, body_bytes).await;
     }
 
     // Static file
     if !fs_path.exists() {
-        let err_doc = htaccess.error_documents.get(&404).map(|s| s.as_str());
-        return error_response(404, "Not Found", err_doc);
+        return error_response(404, "Not Found");
     }
 
     serve_static_file(state, fs_path, req_path, req_headers, htaccess).await
@@ -158,8 +163,7 @@ async fn serve_static_file(
 ) -> Response<Body> {
     let meta = match std::fs::metadata(path) {
         Ok(m) => m,
-        Err(_) => return error_response(404, "Not Found",
-            htaccess.error_documents.get(&404).map(|s| s.as_str())),
+        Err(_) => return error_response(404, "Not Found"),
     };
 
     let file_size = meta.len();
@@ -200,7 +204,7 @@ async fn serve_static_file(
         Ok(d) => d,
         Err(e) => {
             eprintln!("[static] read error {:?}: {}", path, e);
-            return error_response(500, "Internal Server Error", None);
+            return error_response(500, "Internal Server Error");
         }
     };
 
@@ -222,6 +226,7 @@ async fn run_cgi_handler(
     query: &str,
     method: &str,
     req_headers: &HeaderMap,
+    stdin_body: Vec<u8>,
 ) -> Response<Body> {
     let server_name = "localhost";
     let remote_addr = "127.0.0.1";
@@ -256,7 +261,7 @@ async fn run_cgi_handler(
         &http_headers,
     );
 
-    let cgi_out = run_cgi(script_path, ext, env_vars, vec![]).await;
+    let cgi_out = run_cgi(script_path, ext, env_vars, stdin_body).await;
 
     let mut builder = Response::builder().status(cgi_out.status);
     for (k, v) in &cgi_out.headers {
@@ -303,7 +308,7 @@ fn auth_challenge_response(realm: &str) -> Response<Body> {
         .unwrap()
 }
 
-fn error_response(status: u16, message: &str, _error_doc: Option<&str>) -> Response<Body> {
+fn error_response(status: u16, message: &str) -> Response<Body> {
     Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
@@ -337,7 +342,9 @@ fn read_file_range(path: &Path, start: u64, length: u64) -> Vec<u8> {
         Ok(f) => f,
         Err(_) => return vec![],
     };
-    let _ = file.seek(SeekFrom::Start(start));
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return vec![];
+    }
     let mut buf = vec![0u8; length as usize];
     let n = file.read(&mut buf).unwrap_or(0);
     buf.truncate(n);
