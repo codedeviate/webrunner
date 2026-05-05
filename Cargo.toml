@@ -2,7 +2,22 @@
 name = "webrunner"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 license = "MIT"
+authors = ["Thomas Björk <codedv8@gmail.com>"]
+description = "Zero-config development web server with CGI and .htaccess support"
+readme = "README.md"
+homepage = "https://github.com/codedeviate/webrunner"
+repository = "https://github.com/codedeviate/webrunner"
+documentation = "https://github.com/codedeviate/webrunner#readme"
+keywords = ["web-server", "cgi", "htaccess", "http", "development"]
+categories = ["command-line-utilities", "web-programming::http-server", "development-tools"]
+exclude = [
+    ".claude/",
+    ".github/",
+    "Formula/",
+    "packaging/",
+]
 
 [[bin]]
 name = "webrunner"
