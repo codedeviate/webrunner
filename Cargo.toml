@@ -17,6 +17,8 @@ exclude = [
     ".github/",
     "Formula/",
     "packaging/",
+    "CLAUDE.md",
+    "BREW.md",
 ]
 
 [[bin]]
