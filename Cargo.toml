@@ -15,10 +15,7 @@ categories = ["command-line-utilities", "web-programming::http-server", "develop
 exclude = [
     ".claude/",
     ".github/",
-    "homebrew/",
     "/.gitignore",
-    "Formula/",
-    "packaging/",
     "CLAUDE.md",
     "BREW.md",
 ]
