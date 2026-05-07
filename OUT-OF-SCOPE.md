@@ -1,21 +1,32 @@
-# Out of scope / wishlist
+# Out of Scope & Wishlist
 
-A single source of truth for things that have been **considered and deferred**
-or are **deliberate non-goals** for `webrunner`. Doubles as a wishlist: items
-under "Deferred" are open to implementation; items under "Non-goals" should
-stay out unless the project's purpose changes.
+A living list of items raised during design, implementation, or feature sweeps
+that are either explicitly deferred, decided against, or noted as "maybe
+later". Also doubles as a wishlist — items under "Waiting" are things worth
+building once someone explicitly asks. Kept here so ideas don't disappear
+into the black hole of spec files after each release.
 
-When picking up a deferred item, move it into `CHANGELOG.md`'s `[Unreleased]`
-section as part of the implementing commit and remove it from this file.
+Organized into four buckets by reason for non-inclusion. When an item ships,
+remove it from this file and note the shipping version in the CHANGELOG
+entry rather than leaving a crossed-out line here.
 
-## Deferred — open to implementation
+- **Waiting** — can be done; nobody's asked for it.
+- **Deferred** — possible to implement; actively put off (scope/complexity
+  trade-off or waiting on a concrete use case).
+- **Not yet supported** — blocked by upstream / ecosystem maturity; may ship
+  when the blocker clears.
+- **Out of scope** — fundamentally can't be implemented, architecturally
+  mismatched, or intentionally declined by policy.
+
+---
+
+## Waiting
 
 ### Server / transport
 
 - **HTTP→HTTPS redirect.** When both listeners are active, optionally redirect
   plain HTTP to HTTPS instead of serving on both.
 - **HSTS header** on HTTPS responses (`Strict-Transport-Security`), opt-in.
-- **HTTP/2** for HTTPS connections.
 - **IPv6 binding.** Currently binds `0.0.0.0`; should also bind `::` or take a
   configurable bind address.
 - **Range requests** (`Range:` / `206 Partial Content`) for static files —
@@ -38,11 +49,8 @@ section as part of the implementing commit and remove it from this file.
 
 ### CGI
 
-- **FastCGI** / **SCGI** support for persistent script processes (notably
-  PHP-FPM).
 - **Per-directory script aliases** (`AddHandler`, `Action`).
 - **CGI timeouts** — currently scripts can hang indefinitely.
-- **Resource limits** on CGI children (CPU, memory, output size).
 
 ### Operational
 
@@ -59,10 +67,25 @@ section as part of the implementing commit and remove it from this file.
 - **Pre-built release binaries** attached to GitHub releases (linux/macos/win,
   x86_64/aarch64) so Homebrew's bottle path or scoop/winget can pull binaries
   instead of building from source every time.
-- **`homebrew-core` submission** once the project meets notability rules
-  (≥75 stars, ≥30 days, stable releases). Tracked in `BREW.md`.
 
-## Non-goals — deliberately out
+## Deferred
+
+- **HTTP/2** for HTTPS connections. Significant dependency and complexity
+  cost; HTTP/1.1 is fine for a dev server until someone has a concrete need.
+- **FastCGI** / **SCGI** support for persistent script processes (notably
+  PHP-FPM). Worth doing once a user asks — adds a non-trivial transport layer
+  and process-management surface.
+- **Resource limits** on CGI children (CPU, memory, output size). Platform-
+  specific (`setrlimit`, job objects) and only matters once people start
+  pointing webrunner at untrusted scripts.
+
+## Not yet supported
+
+- **`homebrew-core` submission.** Blocked on notability rules
+  (≥75 stars, ≥30 days, stable releases). Will revisit when the project
+  clears the threshold. Tracked in `BREW.md`.
+
+## Out of scope
 
 - **Production deployment.** `webrunner` is a development server. No request
   size limits, rate limiting, slowloris protection, or process isolation
