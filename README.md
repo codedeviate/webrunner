@@ -28,6 +28,20 @@ Built for local development and quick prototyping. Not a production server.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew install codedeviate/cli/webrunner
+```
+
+### From crates.io
+
+```sh
+cargo install webrunner
+```
+
+### From source
+
 Requires Rust 1.75+ (2021 edition).
 
 ```sh

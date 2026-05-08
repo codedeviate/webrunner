@@ -1,6 +1,6 @@
 [package]
 name = "webrunner"
-version = "0.1.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
@@ -14,10 +14,11 @@ keywords = ["web-server", "cgi", "htaccess", "http", "development"]
 categories = ["command-line-utilities", "web-programming::http-server", "development-tools"]
 exclude = [
     ".claude/",
+    ".git/",
     ".github/",
     "/.gitignore",
     "CLAUDE.md",
-    "BREW.md",
+    "OUT-OF-SCOPE.md",
 ]
 
 [[bin]]

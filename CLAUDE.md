@@ -119,4 +119,6 @@ uploading — run it after touching `Cargo.toml` metadata fields.
 6. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
 7. `gh release create vX.Y.Z --generate-notes`.
 8. `cargo publish` (when ready for crates.io).
-9. Update the Homebrew tap per `BREW.md`.
+9. Update the Homebrew formula in the
+   [`codedeviate/homebrew-cli`](https://github.com/codedeviate/homebrew-cli)
+   tap (bump `url`, `sha256`, and `version` to match the new tag).

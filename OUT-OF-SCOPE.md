@@ -83,7 +83,9 @@ entry rather than leaving a crossed-out line here.
 
 - **`homebrew-core` submission.** Blocked on notability rules
   (≥75 stars, ≥30 days, stable releases). Will revisit when the project
-  clears the threshold. Tracked in `BREW.md`.
+  clears the threshold. Until then, distribution goes through the
+  [`codedeviate/homebrew-cli`](https://github.com/codedeviate/homebrew-cli)
+  tap.
 
 ## Out of scope
 
