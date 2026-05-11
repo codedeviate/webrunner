@@ -13,7 +13,8 @@ Built for local development and quick prototyping. Not a production server.
 
 - Static file serving with automatic MIME detection
 - Directory listings (toggleable per-request and via `Options ±Indexes`)
-- CGI/1.1 execution for `.pl`, `.php`, `.ts`, and `.js` scripts
+- CGI/1.1 execution for `.pl` and `.php` (always on); `.ts` and `.js`
+  opt-in via `--cgi`
 - `.htaccess` support with per-directory overrides:
   - `DirectoryIndex`, `Options ±Indexes`
   - `ErrorDocument` for custom error pages
