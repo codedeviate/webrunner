@@ -12,6 +12,11 @@ pub struct CgiOutput {
     pub body: Vec<u8>,
 }
 
+/// Returns true if `ext` is a CGI-handled file extension.
+///
+/// `pl` and `php` are always treated as CGI. `extra` is the per-process opt-in set
+/// (from `--cgi`); entries MUST already be lowercase. `CliConfig::validate` enforces
+/// this; do not call with un-normalised input.
 pub fn is_cgi_ext(ext: &str, extra: &[String]) -> bool {
     let e = ext.to_lowercase();
     matches!(e.as_str(), "pl" | "php") || extra.iter().any(|x| x == &e)
@@ -238,6 +243,9 @@ mod tests {
         assert!(is_cgi_ext("JS", &extras));
         assert!(is_cgi_ext("pl", &extras));
         assert!(!is_cgi_ext("html", &extras));
+        // Contract: extras must already be lowercased by the caller.
+        // An un-normalised entry will NOT match (validate() prevents this in production).
+        assert!(!is_cgi_ext("js", &["JS".to_string()]));
     }
 
     #[test]
