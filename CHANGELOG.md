@@ -12,6 +12,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- `--cgi <ext[,ext...]>` flag to opt extensions into CGI execution
+  on top of the always-on `pl` / `php` defaults.
+
+### Changed
+
+- **Breaking (0.x):** `.js` and `.ts` files are no longer executed as
+  CGI by default — they are served as static assets so plain HTML +
+  JS sites work without configuration. To restore the previous
+  behaviour, pass `--cgi js,ts`.
+
 ## [0.3.1] - 2026-05-08
 
 ### Added

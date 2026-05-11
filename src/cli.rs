@@ -27,6 +27,13 @@ pub struct CliConfig {
     #[arg(long)]
     pub no_index: bool,
 
+    /// Additional file extensions to execute as CGI (e.g. --cgi js,ts).
+    /// Always-on CGI extensions (pl, php) are independent of this flag.
+    /// Accepted values: js, ts, pl, php. Case-insensitive. Comma-separated
+    /// and/or repeated.
+    #[arg(long, value_delimiter = ',')]
+    pub cgi: Vec<String>,
+
     /// Print usage examples and exit
     #[arg(long)]
     pub examples: bool,
@@ -38,14 +45,31 @@ impl CliConfig {
         self.https || (self.cert.is_some() && self.key.is_some())
     }
 
-    /// Validate that --cert and --key are either both present or both absent.
+    /// Validate CLI arguments. Normalises `cgi` in place (lowercase, dedup).
     /// Returns an error message if invalid.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&mut self) -> Result<(), String> {
         match (self.cert.as_ref(), self.key.as_ref()) {
-            (Some(_), None) => Err("--cert requires --key".to_string()),
-            (None, Some(_)) => Err("--key requires --cert".to_string()),
-            _ => Ok(()),
+            (Some(_), None) => return Err("--cert requires --key".to_string()),
+            (None, Some(_)) => return Err("--key requires --cert".to_string()),
+            _ => {}
         }
+
+        const ALLOWED: &[&str] = &["js", "ts", "pl", "php"];
+        let mut normalised: Vec<String> = Vec::new();
+        for raw in &self.cgi {
+            let lower = raw.to_lowercase();
+            if !ALLOWED.contains(&lower.as_str()) {
+                return Err(format!(
+                    "--cgi: unknown extension '{}' (allowed: js, ts, pl, php)",
+                    raw
+                ));
+            }
+            if !normalised.contains(&lower) {
+                normalised.push(lower);
+            }
+        }
+        self.cgi = normalised;
+        Ok(())
     }
 }
 
@@ -92,19 +116,58 @@ mod tests {
 
     #[test]
     fn test_validate_cert_without_key() {
-        let cfg = CliConfig::parse_from(["webrunner", "--cert", "/c.pem"]);
+        let mut cfg = CliConfig::parse_from(["webrunner", "--cert", "/c.pem"]);
         assert!(cfg.validate().is_err());
     }
 
     #[test]
     fn test_validate_key_without_cert() {
-        let cfg = CliConfig::parse_from(["webrunner", "--key", "/k.pem"]);
+        let mut cfg = CliConfig::parse_from(["webrunner", "--key", "/k.pem"]);
         assert!(cfg.validate().is_err());
     }
 
     #[test]
     fn test_validate_both_ok() {
-        let cfg = CliConfig::parse_from(["webrunner", "--cert", "/c.pem", "--key", "/k.pem"]);
+        let mut cfg = CliConfig::parse_from(["webrunner", "--cert", "/c.pem", "--key", "/k.pem"]);
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_cgi_default_empty() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert!(cfg.cgi.is_empty());
+    }
+
+    #[test]
+    fn test_cgi_comma_list() {
+        let cfg = CliConfig::parse_from(["webrunner", "--cgi", "js,ts"]);
+        assert_eq!(cfg.cgi, vec!["js".to_string(), "ts".to_string()]);
+    }
+
+    #[test]
+    fn test_cgi_repeated_flag() {
+        let cfg = CliConfig::parse_from(["webrunner", "--cgi", "js", "--cgi", "ts"]);
+        assert_eq!(cfg.cgi, vec!["js".to_string(), "ts".to_string()]);
+    }
+
+    #[test]
+    fn test_cgi_validate_lowercases_and_dedups() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--cgi", "JS,js,Ts"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.cgi, vec!["js".to_string(), "ts".to_string()]);
+    }
+
+    #[test]
+    fn test_cgi_validate_accepts_pl_php_as_noop() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--cgi", "pl,php"]);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_cgi_validate_rejects_unknown() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--cgi", "html"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--cgi"));
+        assert!(err.contains("html"));
     }
 }
