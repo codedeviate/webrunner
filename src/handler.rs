@@ -116,7 +116,7 @@ async fn serve_path(
     if fs_path.is_dir() {
         if let Some(index_path) = resolve_index(fs_path, &htaccess.directory_index) {
             let ext = index_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if is_cgi_ext(ext) {
+            if is_cgi_ext(ext, &state.config.cgi) {
                 return run_cgi_handler(state, &index_path, ext, req_path, query, method, req_headers, body_bytes).await;
             } else {
                 return serve_static_file(state, &index_path, req_path, req_headers, htaccess).await;
@@ -146,7 +146,7 @@ async fn serve_path(
 
     // CGI script
     let ext = fs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if is_cgi_ext(ext) {
+    if is_cgi_ext(ext, &state.config.cgi) {
         return run_cgi_handler(state, fs_path, ext, req_path, query, method, req_headers, body_bytes).await;
     }
 

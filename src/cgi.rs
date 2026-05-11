@@ -12,8 +12,9 @@ pub struct CgiOutput {
     pub body: Vec<u8>,
 }
 
-pub fn is_cgi_ext(ext: &str) -> bool {
-    matches!(ext.to_lowercase().as_str(), "pl" | "php" | "ts" | "js")
+pub fn is_cgi_ext(ext: &str, extra: &[String]) -> bool {
+    let e = ext.to_lowercase();
+    matches!(e.as_str(), "pl" | "php") || extra.iter().any(|x| x == &e)
 }
 
 pub fn interpreter_for(ext: &str) -> Option<(&'static str, Vec<&'static str>)> {
@@ -218,13 +219,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_cgi_ext() {
-        assert!(is_cgi_ext("pl"));
-        assert!(is_cgi_ext("php"));
-        assert!(is_cgi_ext("ts"));
-        assert!(is_cgi_ext("js"));
-        assert!(!is_cgi_ext("html"));
-        assert!(!is_cgi_ext("css"));
+    fn test_is_cgi_ext_defaults() {
+        let empty: Vec<String> = Vec::new();
+        assert!(is_cgi_ext("pl", &empty));
+        assert!(is_cgi_ext("php", &empty));
+        assert!(is_cgi_ext("PHP", &empty));
+        assert!(!is_cgi_ext("js", &empty));
+        assert!(!is_cgi_ext("ts", &empty));
+        assert!(!is_cgi_ext("html", &empty));
+        assert!(!is_cgi_ext("css", &empty));
+    }
+
+    #[test]
+    fn test_is_cgi_ext_with_extras() {
+        let extras = vec!["js".to_string(), "ts".to_string()];
+        assert!(is_cgi_ext("js", &extras));
+        assert!(is_cgi_ext("ts", &extras));
+        assert!(is_cgi_ext("JS", &extras));
+        assert!(is_cgi_ext("pl", &extras));
+        assert!(!is_cgi_ext("html", &extras));
     }
 
     #[test]
