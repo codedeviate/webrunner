@@ -51,6 +51,8 @@ entry rather than leaving a crossed-out line here.
 
 - **Per-directory script aliases** (`AddHandler`, `Action`).
 - **CGI timeouts** — currently scripts can hang indefinitely.
+- **`--no-cgi <ext[,ext...]>` flag** to disable the always-on `pl` /
+  `php` defaults (mirror of `--cgi`).
 
 ### Operational
 

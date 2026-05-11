@@ -81,6 +81,8 @@ webrunner [OPTIONS]
       --cert <PATH>          Path to TLS certificate (PEM); requires --key
       --key  <PATH>          Path to TLS private key (PEM); requires --cert
       --no-index             Disable directory listing (return 403 for dirs)
+      --cgi <EXT[,EXT...]>   Extra extensions to execute as CGI (js, ts).
+                             pl and php are CGI by default.
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -130,6 +132,19 @@ Scripts receive standard CGI/1.1 environment variables (`REQUEST_METHOD`,
 `HTTP_*`, …). The POST body is delivered on stdin. Output is parsed as
 headers + blank line + body; use `Status: 404 Not Found` to set a non-200
 response.
+
+### Executing server-side JavaScript / TypeScript
+
+By default, `.js` and `.ts` files are served as static assets — which is
+what a normal static site needs. To execute them server-side via `bun run`
+instead, opt in with `--cgi`:
+
+```sh
+webrunner --cgi js,ts
+```
+
+The script's stdout is parsed as CGI output (headers, blank line, body),
+same as for `.pl` / `.php`. `bun` must be on `PATH`.
 
 ### Front-controller rewrite + basic auth
 
