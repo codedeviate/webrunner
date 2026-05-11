@@ -15,8 +15,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Added
 
 - `--cgi <ext[,ext...]>` flag to opt extensions into CGI execution
-  on top of the always-on `pl` / `php` defaults. Currently accepts
-  `js` and `ts`.
+  on top of the always-on `pl` / `php` defaults.
 
 ### Changed
 
