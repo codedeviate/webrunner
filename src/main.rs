@@ -14,7 +14,7 @@ use std::env;
 
 #[tokio::main]
 async fn main() {
-    let config = cli::CliConfig::parse();
+    let mut config = cli::CliConfig::parse();
 
     if config.examples {
         print_examples();
