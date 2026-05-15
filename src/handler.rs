@@ -2,10 +2,11 @@
 
 use axum::{
     body::Body,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{Request, Response, header, HeaderMap},
 };
 use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -26,6 +27,7 @@ pub struct AppState {
 
 pub async fn handle_request(
     State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     req: Request<Body>,
 ) -> Response<Body> {
     let (parts, body) = req.into_parts();
@@ -94,14 +96,15 @@ pub async fn handle_request(
                 Some(p) => p,
                 None => return error_response(400, "Bad Request"),
             };
-            return serve_path(&state, &new_fs, &new_path, query, &method, &req_headers, &htaccess, body_bytes).await;
+            return serve_path(&state, &new_fs, &new_path, query, &method, &req_headers, &htaccess, body_bytes, peer_addr.ip()).await;
         }
         RewriteResult::None => {}
     }
 
-    serve_path(&state, &fs_path, path_str, query, &method, &req_headers, &htaccess, body_bytes).await
+    serve_path(&state, &fs_path, path_str, query, &method, &req_headers, &htaccess, body_bytes, peer_addr.ip()).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn serve_path(
     state: &AppState,
     fs_path: &Path,
@@ -111,13 +114,14 @@ async fn serve_path(
     req_headers: &HeaderMap,
     htaccess: &crate::htaccess::HtaccessConfig,
     body_bytes: Vec<u8>,
+    peer_ip: IpAddr,
 ) -> Response<Body> {
     // Directory handling
     if fs_path.is_dir() {
         if let Some(index_path) = resolve_index(fs_path, &htaccess.directory_index) {
             let ext = index_path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if is_cgi_ext(ext, &state.config.cgi, &state.config.no_cgi) {
-                return run_cgi_handler(state, &index_path, ext, req_path, query, method, req_headers, body_bytes).await;
+                return run_cgi_handler(state, &index_path, ext, req_path, query, method, req_headers, body_bytes, peer_ip).await;
             } else {
                 return serve_static_file(state, &index_path, req_path, req_headers, htaccess).await;
             }
@@ -147,7 +151,7 @@ async fn serve_path(
     // CGI script
     let ext = fs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if is_cgi_ext(ext, &state.config.cgi, &state.config.no_cgi) {
-        return run_cgi_handler(state, fs_path, ext, req_path, query, method, req_headers, body_bytes).await;
+        return run_cgi_handler(state, fs_path, ext, req_path, query, method, req_headers, body_bytes, peer_ip).await;
     }
 
     // Static file
@@ -231,6 +235,7 @@ async fn serve_static_file(
         .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_cgi_handler(
     state: &AppState,
     script_path: &Path,
@@ -240,9 +245,11 @@ async fn run_cgi_handler(
     method: &str,
     req_headers: &HeaderMap,
     stdin_body: Vec<u8>,
+    peer_ip: IpAddr,
 ) -> Response<Body> {
     let server_name = "localhost";
-    let remote_addr = "127.0.0.1";
+    let peer_ip_str = peer_ip.to_string();
+    let remote_addr: &str = &peer_ip_str;
     let content_type = req_headers.get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let content_length = stdin_body.len();

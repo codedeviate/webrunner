@@ -153,7 +153,7 @@ pub async fn bind_and_serve(
         tasks.push(tokio::spawn(async move {
             axum_server::from_tcp(listener)
                 .handle(handle)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
         }));
     }
@@ -165,7 +165,7 @@ pub async fn bind_and_serve(
         tasks.push(tokio::spawn(async move {
             axum_server::tls_rustls::from_tcp_rustls(listener, tls_config)
                 .handle(handle)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
         }));
     }
