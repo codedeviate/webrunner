@@ -14,11 +14,16 @@ pub struct CgiOutput {
 
 /// Returns true if `ext` is a CGI-handled file extension.
 ///
-/// `pl` and `php` are always treated as CGI. `extra` is the per-process opt-in set
-/// (from `--cgi`); entries MUST already be lowercase. `CliConfig::validate` enforces
-/// this; do not call with un-normalised input.
-pub fn is_cgi_ext(ext: &str, extra: &[String]) -> bool {
+/// `pl` and `php` are always treated as CGI UNLESS listed in `disabled`
+/// (from `--no-cgi`). `extra` is the per-process opt-in set (from `--cgi`).
+/// Both `extra` and `disabled` entries MUST already be lowercase;
+/// `CliConfig::validate` enforces this. `extra` and `disabled` MUST NOT
+/// share any entry; `CliConfig::validate` enforces that too.
+pub fn is_cgi_ext(ext: &str, extra: &[String], disabled: &[String]) -> bool {
     let e = ext.to_lowercase();
+    if disabled.iter().any(|x| x == &e) {
+        return false;
+    }
     matches!(e.as_str(), "pl" | "php") || extra.iter().any(|x| x == &e)
 }
 
@@ -226,26 +231,49 @@ mod tests {
     #[test]
     fn test_is_cgi_ext_defaults() {
         let empty: Vec<String> = Vec::new();
-        assert!(is_cgi_ext("pl", &empty));
-        assert!(is_cgi_ext("php", &empty));
-        assert!(is_cgi_ext("PHP", &empty));
-        assert!(!is_cgi_ext("js", &empty));
-        assert!(!is_cgi_ext("ts", &empty));
-        assert!(!is_cgi_ext("html", &empty));
-        assert!(!is_cgi_ext("css", &empty));
+        assert!(is_cgi_ext("pl", &empty, &empty));
+        assert!(is_cgi_ext("php", &empty, &empty));
+        assert!(is_cgi_ext("PHP", &empty, &empty));
+        assert!(!is_cgi_ext("js", &empty, &empty));
+        assert!(!is_cgi_ext("ts", &empty, &empty));
+        assert!(!is_cgi_ext("html", &empty, &empty));
+        assert!(!is_cgi_ext("css", &empty, &empty));
     }
 
     #[test]
     fn test_is_cgi_ext_with_extras() {
+        let empty: Vec<String> = Vec::new();
         let extras = vec!["js".to_string(), "ts".to_string()];
-        assert!(is_cgi_ext("js", &extras));
-        assert!(is_cgi_ext("ts", &extras));
-        assert!(is_cgi_ext("JS", &extras));
-        assert!(is_cgi_ext("pl", &extras));
-        assert!(!is_cgi_ext("html", &extras));
+        assert!(is_cgi_ext("js", &extras, &empty));
+        assert!(is_cgi_ext("ts", &extras, &empty));
+        assert!(is_cgi_ext("JS", &extras, &empty));
+        assert!(is_cgi_ext("pl", &extras, &empty));
+        assert!(!is_cgi_ext("html", &extras, &empty));
         // Contract: extras must already be lowercased by the caller.
         // An un-normalised entry will NOT match (validate() prevents this in production).
-        assert!(!is_cgi_ext("js", &["JS".to_string()]));
+        let upper_extras = vec!["JS".to_string()];
+        assert!(!is_cgi_ext("js", &upper_extras, &empty));
+    }
+
+    #[test]
+    fn test_is_cgi_ext_disabled_overrides_default() {
+        let empty: Vec<String> = Vec::new();
+        let disabled = vec!["pl".to_string()];
+        assert!(!is_cgi_ext("pl", &empty, &disabled));
+    }
+
+    #[test]
+    fn test_is_cgi_ext_disabled_one_doesnt_affect_other() {
+        let empty: Vec<String> = Vec::new();
+        let disabled = vec!["pl".to_string()];
+        assert!(is_cgi_ext("php", &empty, &disabled));
+    }
+
+    #[test]
+    fn test_is_cgi_ext_disabled_case_insensitive_input() {
+        let empty: Vec<String> = Vec::new();
+        let disabled = vec!["pl".to_string()];
+        assert!(!is_cgi_ext("PL", &empty, &disabled));
     }
 
     #[test]
