@@ -89,9 +89,9 @@ webrunner [OPTIONS]
                              Default: 0.0.0.0,::
       --cgi <EXT[,EXT...]>   Extra extensions to execute as CGI (js, ts).
                              pl and php are CGI by default.
-      --no-cgi <EXT[,EXT...]> Disable always-on CGI for listed extensions
-                             (pl, php). Mutually exclusive with --cgi
-                             per extension.
+      --no-cgi <EXT>         Disable always-on CGI for listed extensions
+                             (pl, php). Repeatable / comma-separated.
+                             Mutually exclusive with --cgi per extension.
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
