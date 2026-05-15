@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 #[derive(Parser, Debug, Clone)]
@@ -124,12 +125,35 @@ impl CliConfig {
 
         Ok(())
     }
+
+    /// Resolve the document root to an absolute, validated path.
+    /// Picks `--root` if set, then the positional argument, then falls
+    /// back to the current working directory. The result is
+    /// canonicalised (symlinks followed) and verified to be a directory.
+    #[allow(dead_code)] // removed when wired in main.rs (Task 3)
+    pub fn resolve_root(&self) -> Result<PathBuf, String> {
+        let raw: Option<&str> = self.root.as_deref().or(self.root_pos.as_deref());
+        let path = match raw {
+            Some(s) => PathBuf::from(s),
+            None => std::env::current_dir()
+                .map_err(|e| format!("cannot determine current directory: {}", e))?,
+        };
+        let canonical = path.canonicalize().map_err(|e| {
+            format!("--root: cannot resolve '{}': {}", path.display(), e)
+        })?;
+        if !canonical.is_dir() {
+            return Err(format!("--root: not a directory: '{}'", canonical.display()));
+        }
+        Ok(canonical)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
     fn test_defaults() {
@@ -355,5 +379,63 @@ mod tests {
     fn test_root_validate_accepts_neither() {
         let mut cfg = CliConfig::parse_from(["webrunner"]);
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_resolve_root_flag_returns_canonical_path() {
+        let tmp = tempdir().unwrap();
+        let expected = tmp.path().canonicalize().unwrap();
+        let cfg = CliConfig::parse_from(["webrunner", "--root", tmp.path().to_str().unwrap()]);
+        let got = cfg.resolve_root().unwrap();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn test_resolve_root_positional_returns_canonical_path() {
+        let tmp = tempdir().unwrap();
+        let expected = tmp.path().canonicalize().unwrap();
+        let cfg = CliConfig::parse_from(["webrunner", tmp.path().to_str().unwrap()]);
+        let got = cfg.resolve_root().unwrap();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn test_resolve_root_flag_wins_over_positional() {
+        // This case is normally rejected by validate(), but resolve_root
+        // is independent and uses the flag when both are set.
+        let tmp = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        let cfg = CliConfig::parse_from([
+            "webrunner",
+            "--root", tmp.path().to_str().unwrap(),
+            other.path().to_str().unwrap(),
+        ]);
+        let got = cfg.resolve_root().unwrap();
+        assert_eq!(got, tmp.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_resolve_root_missing_path_errors() {
+        let cfg = CliConfig::parse_from(["webrunner", "--root", "/definitely/does/not/exist/wr"]);
+        let err = cfg.resolve_root().unwrap_err();
+        assert!(err.contains("--root"));
+        assert!(err.contains("/definitely/does/not/exist/wr"));
+    }
+
+    #[test]
+    fn test_resolve_root_file_not_directory_errors() {
+        let tmp = tempdir().unwrap();
+        let file_path = tmp.path().join("not-a-dir.txt");
+        std::fs::write(&file_path, b"hello").unwrap();
+        let cfg = CliConfig::parse_from(["webrunner", "--root", file_path.to_str().unwrap()]);
+        let err = cfg.resolve_root().unwrap_err();
+        assert!(err.contains("not a directory"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_resolve_root_default_returns_absolute_path() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        let got: PathBuf = cfg.resolve_root().expect("cwd resolves");
+        assert!(got.is_absolute(), "expected absolute path, got: {:?}", got);
     }
 }
