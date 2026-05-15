@@ -84,6 +84,7 @@ impl CliConfig {
         }
         self.cgi = normalised;
 
+        // Must check before filling the default so bind_explicit reflects user input.
         self.bind_explicit = !self.bind.is_empty();
         if self.bind.is_empty() {
             self.bind = vec!["0.0.0.0".to_string(), "::".to_string()];
