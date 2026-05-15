@@ -47,6 +47,15 @@ pub struct CliConfig {
     #[clap(skip)]
     pub bind_explicit: bool,
 
+    /// Directory to serve. Default: current working directory.
+    /// Mutually exclusive with the positional <DIR> argument.
+    #[arg(long, value_name = "DIR")]
+    pub root: Option<String>,
+
+    /// Directory to serve (positional). Same semantics as --root.
+    #[arg(value_name = "DIR")]
+    pub root_pos: Option<String>,
+
     /// Print usage examples and exit
     #[arg(long)]
     pub examples: bool,
@@ -59,7 +68,8 @@ impl CliConfig {
     }
 
     /// Validate CLI arguments. Normalises `cgi` and `bind` in place,
-    /// fills the default bind set, and records `bind_explicit`.
+    /// fills the default bind set, records `bind_explicit`, and rejects
+    /// passing both `--root` and the positional <DIR> together.
     /// Returns an error message if invalid.
     pub fn validate(&mut self) -> Result<(), String> {
         match (self.cert.as_ref(), self.key.as_ref()) {
@@ -103,6 +113,13 @@ impl CliConfig {
             }
         }
         self.bind = canonical;
+
+        if self.root.is_some() && self.root_pos.is_some() {
+            return Err(
+                "--root and the positional <DIR> argument are mutually exclusive"
+                    .to_string(),
+            );
+        }
 
         Ok(())
     }
@@ -290,5 +307,52 @@ mod tests {
             "::1".to_string(),
         ]);
         assert!(cfg.bind_explicit);
+    }
+
+    #[test]
+    fn test_root_flag_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--root", "./docs"]);
+        assert_eq!(cfg.root.as_deref(), Some("./docs"));
+        assert!(cfg.root_pos.is_none());
+    }
+
+    #[test]
+    fn test_root_positional_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "./docs"]);
+        assert!(cfg.root.is_none());
+        assert_eq!(cfg.root_pos.as_deref(), Some("./docs"));
+    }
+
+    #[test]
+    fn test_root_default_both_none() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert!(cfg.root.is_none());
+        assert!(cfg.root_pos.is_none());
+    }
+
+    #[test]
+    fn test_root_validate_rejects_both_forms() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--root", "./a", "./b"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--root"));
+        assert!(err.contains("positional"));
+    }
+
+    #[test]
+    fn test_root_validate_accepts_flag_alone() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--root", "./a"]);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_root_validate_accepts_positional_alone() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "./a"]);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_root_validate_accepts_neither() {
+        let mut cfg = CliConfig::parse_from(["webrunner"]);
+        assert!(cfg.validate().is_ok());
     }
 }
