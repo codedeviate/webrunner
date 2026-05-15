@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (complements the existing `If-None-Match` / ETag handling).
   Returns 304 when the file has not been modified since the
   client's reported time.
-- `--compression <on|off>` flag (default `on`) enabling Brotli / gzip
+- `--compression <on|off>` flag (default `on`) enabling brotli / gzip
   Content-Encoding for compressible static files (text/*,
   application/json, application/javascript, SVG, wasm). Responses
   under 256 bytes and Range responses are served uncompressed.

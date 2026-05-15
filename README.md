@@ -97,7 +97,7 @@ webrunner [OPTIONS]
       --log-level <LEVEL>    off | warn | info | debug. Default: info
       --log <PATH>           Access log file, or - for stdout.
                              Combined Log Format.
-      --compression <ON|OFF> Enable gzip / brotli compression for
+      --compression <ON|OFF> Enable brotli / gzip compression for
                              text-shaped static files. Default: on
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
