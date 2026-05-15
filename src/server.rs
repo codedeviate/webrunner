@@ -76,6 +76,10 @@ pub async fn run(config: CliConfig, root: PathBuf) -> Result<(), String> {
 /// produced by the caller; this function consumes them and spawns one
 /// axum_server task per listener. All tasks share the supplied
 /// `Handle` for unified graceful shutdown.
+///
+/// On the first listener failure, the shared `Handle` is asked to
+/// gracefully shut down all sibling listeners before this function
+/// returns `Err`.
 pub async fn bind_and_serve(
     app: Router,
     http_listeners: Vec<TcpListener>,
@@ -111,8 +115,14 @@ pub async fn bind_and_serve(
     for task in tasks {
         match task.await {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(format!("listener error: {}", e)),
-            Err(e) => return Err(format!("listener join error: {}", e)),
+            Ok(Err(e)) => {
+                handle.graceful_shutdown(Some(Duration::from_secs(5)));
+                return Err(format!("listener error: {}", e));
+            }
+            Err(e) => {
+                handle.graceful_shutdown(Some(Duration::from_secs(5)));
+                return Err(format!("listener join error: {}", e));
+            }
         }
     }
     Ok(())
