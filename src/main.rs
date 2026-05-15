@@ -32,7 +32,13 @@ async fn main() {
     check_interpreter("php",   &["php"]);
     check_interpreter("bun",   &["ts", "js"]);
 
-    let root = env::current_dir().expect("Cannot determine current directory");
+    let root = match config.resolve_root() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     if let Err(e) = server::run(config, root).await {
         eprintln!("Error: {}", e);

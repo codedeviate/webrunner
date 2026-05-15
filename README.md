@@ -82,6 +82,8 @@ webrunner [OPTIONS]
       --cert <PATH>          Path to TLS certificate (PEM); requires --key
       --key  <PATH>          Path to TLS private key (PEM); requires --cert
       --no-index             Disable directory listing (return 403 for dirs)
+      --root <DIR>           Directory to serve (also accepted as a
+                             positional argument). Default: cwd.
       --bind <ADDR>          Bind addresses (IPv4/IPv6 literals).
                              Repeatable / comma-separated.
                              Default: 0.0.0.0,::
@@ -102,6 +104,17 @@ auth, rewrites, and HTTPS.
 ```sh
 webrunner -p 3000 --no-index
 ```
+
+### Serve a specific directory
+
+```sh
+webrunner --root ./docs
+webrunner ./docs              # same thing, positional form
+```
+
+The path is canonicalised at startup; the `Serving …` banner shows the
+absolute directory webrunner is actually serving. The default (no flag,
+no positional) is unchanged: serve the current working directory.
 
 ### HTTPS with a self-signed cert
 

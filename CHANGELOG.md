@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - `--bind <ADDR[,ADDR...]>` flag to choose the listener address(es).
   Accepts IPv4 and IPv6 literals; comma-separated and/or repeatable.
+- `--root <DIR>` flag (and equivalent positional argument) for
+  choosing the document root. The path is canonicalised at startup
+  and validated to be an existing directory. Default behaviour
+  (current working directory) is unchanged.
 
 ### Changed
 
