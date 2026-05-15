@@ -23,6 +23,7 @@ impl std::fmt::Debug for AccessLog {
 impl AccessLog {
     /// Open the access log sink. `target == "-"` selects stdout; any
     /// other value is opened as a file in append+create mode.
+    #[allow(dead_code)] // wired in Task 4
     pub fn open(target: &str) -> Result<Self, String> {
         let writer: Box<dyn Write + Send> = if target == "-" {
             Box::new(stdout())
@@ -55,6 +56,7 @@ impl AccessLog {
 /// Spec: `%h - %u [%t] "%r" %>s %b "%{Referer}i" "%{User-Agent}i"`.
 /// `%l` (ident) is always `-`. `%b` is `-` when `body_size == 0`.
 #[allow(dead_code)] // wired in Task 4
+#[allow(clippy::too_many_arguments)] // mirrors Combined Log Format field set
 pub fn format_combined(
     remote_ip: IpAddr,
     auth_user: Option<&str>,
