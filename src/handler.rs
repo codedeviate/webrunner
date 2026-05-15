@@ -271,7 +271,7 @@ async fn run_cgi_handler(
         &http_headers,
     );
 
-    let cgi_out = run_cgi(script_path, ext, env_vars, stdin_body).await;
+    let cgi_out = run_cgi(script_path, ext, env_vars, stdin_body, state.config.cgi_timeout).await;
 
     let mut builder = Response::builder().status(cgi_out.status);
     for (k, v) in &cgi_out.headers {

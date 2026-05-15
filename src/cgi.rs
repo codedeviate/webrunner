@@ -127,6 +127,7 @@ pub async fn run_cgi(
     ext: &str,
     env_vars: Vec<(String, String)>,
     stdin_body: Vec<u8>,
+    timeout_secs: u64,
 ) -> CgiOutput {
     let (interpreter, args) = match interpreter_for(ext) {
         Some(v) => v,
@@ -149,6 +150,7 @@ pub async fn run_cgi(
     cmd.arg(script_path);
     cmd.current_dir(script_dir);
     cmd.env_clear();
+    cmd.kill_on_drop(true);
     // Preserve PATH so interpreters can be located
     if let Ok(path) = std::env::var("PATH") {
         cmd.env("PATH", path);
@@ -211,14 +213,22 @@ pub async fn run_cgi(
         parse_cgi_output(&stdout_bytes)
     };
 
-    match tokio::time::timeout(Duration::from_secs(30), run).await {
-        Ok(output) => output,
-        Err(_) => {
-            eprintln!("[CGI ERROR] Script timed out after 30 seconds: {}", script_path.display());
-            CgiOutput {
-                status: 504,
-                headers: vec![],
-                body: b"Gateway Timeout".to_vec(),
+    if timeout_secs == 0 {
+        run.await
+    } else {
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), run).await {
+            Ok(output) => output,
+            Err(_) => {
+                eprintln!(
+                    "[CGI ERROR] Script timed out after {} seconds: {}",
+                    timeout_secs,
+                    script_path.display(),
+                );
+                CgiOutput {
+                    status: 504,
+                    headers: vec![],
+                    body: b"Gateway Timeout".to_vec(),
+                }
             }
         }
     }
