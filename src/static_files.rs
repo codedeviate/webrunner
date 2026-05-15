@@ -2,6 +2,9 @@
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use time::macros::format_description;
+use time::PrimitiveDateTime;
 
 /// Find the first existing index file from `candidates` in `dir`.
 pub fn resolve_index(dir: &Path, candidates: &[String]) -> Option<PathBuf> {
@@ -28,6 +31,24 @@ pub fn http_date(time: SystemTime) -> String {
     let (wday, day, month, year, hour, min, sec) = epoch_to_date(secs);
     format!("{}, {:02} {} {} {:02}:{:02}:{:02} GMT",
         days[wday], day, months[month], year, hour, min, sec)
+}
+
+#[allow(dead_code)]
+const IMF_FIXDATE: &[time::format_description::FormatItem<'_>] = format_description!(
+    "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT"
+);
+
+/// Parse an RFC 7231 IMF-fixdate string (`Sun, 06 Nov 1994 08:49:37 GMT`)
+/// into a `SystemTime`. Returns `None` for any unparseable input —
+/// callers should treat `None` as "header absent" per RFC 7232 §3.3.
+#[allow(dead_code)]
+pub fn parse_imf_fixdate(s: &str) -> Option<SystemTime> {
+    let dt = PrimitiveDateTime::parse(s, IMF_FIXDATE).ok()?;
+    let secs = dt.assume_utc().unix_timestamp();
+    if secs < 0 {
+        return None;
+    }
+    Some(UNIX_EPOCH + std::time::Duration::from_secs(secs as u64))
 }
 
 fn epoch_to_date(secs: u64) -> (usize, u32, usize, u32, u32, u32, u32) {
@@ -181,6 +202,22 @@ mod tests {
         assert_eq!(tag1, tag2);
         assert_ne!(tag1, tag3);
         assert!(tag1.starts_with('"') && tag1.ends_with('"'));
+    }
+
+    #[test]
+    fn test_parse_imf_fixdate_valid() {
+        let parsed = parse_imf_fixdate("Sun, 06 Nov 1994 08:49:37 GMT")
+            .expect("valid IMF-fixdate should parse");
+        // Round-trip through http_date() must reproduce the input string.
+        assert_eq!(http_date(parsed), "Sun, 06 Nov 1994 08:49:37 GMT");
+    }
+
+    #[test]
+    fn test_parse_imf_fixdate_invalid_returns_none() {
+        assert!(parse_imf_fixdate("").is_none());
+        assert!(parse_imf_fixdate("not a date").is_none());
+        // RFC 850 form is explicitly unsupported per the design.
+        assert!(parse_imf_fixdate("Sunday, 06-Nov-94 08:49:37 GMT").is_none());
     }
 
     #[test]
