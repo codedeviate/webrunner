@@ -33,7 +33,7 @@ impl Log for WebrunnerLogger {
         }
         match record.level() {
             Level::Error | Level::Warn => eprintln!("{}", record.args()),
-            _ => println!("{}", record.args()),
+            Level::Info | Level::Debug | Level::Trace => println!("{}", record.args()),
         }
     }
 
