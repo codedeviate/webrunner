@@ -120,6 +120,8 @@ impl CliConfig {
         }
         self.no_cgi = no_cgi_normalised;
 
+        // self.cgi and self.no_cgi are both already normalised at this point,
+        // so the comparison below is lowercase-to-lowercase.
         for ext in &self.no_cgi {
             if self.cgi.contains(ext) {
                 return Err(format!(
