@@ -122,6 +122,12 @@ pub fn build_cgi_env(
     env
 }
 
+/// Run a CGI script and capture its response.
+///
+/// `timeout_secs` bounds the script's wall-clock runtime: when it elapses,
+/// the child is SIGKILL'd (via `kill_on_drop`) and `504 Gateway Timeout`
+/// is returned. A value of `0` disables the timeout entirely — the script
+/// is allowed to run to completion.
 pub async fn run_cgi(
     script_path: &Path,
     ext: &str,
