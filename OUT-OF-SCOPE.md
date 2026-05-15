@@ -27,10 +27,6 @@ entry rather than leaving a crossed-out line here.
 - **HTTP→HTTPS redirect.** When both listeners are active, optionally redirect
   plain HTTP to HTTPS instead of serving on both.
 - **HSTS header** on HTTPS responses (`Strict-Transport-Security`), opt-in.
-- **Range requests** (`Range:` / `206 Partial Content`) for static files —
-  matters for video and large downloads.
-- **Conditional requests** — `ETag`, `Last-Modified`, `If-None-Match`,
-  `If-Modified-Since` for static files.
 - **Compression** — `Content-Encoding: gzip` / `br` for compressible MIME
   types, gated by `Accept-Encoding`.
 - **Separate `--bind-http` / `--bind-https`** for asymmetric bind sets
