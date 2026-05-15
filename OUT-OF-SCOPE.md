@@ -60,7 +60,6 @@ entry rather than leaving a crossed-out line here.
 - **Configurable log level** (currently warnings to stderr; nothing else).
 - **File watching / hot reload** of `.htaccess` so edits don't require
   request-time re-parse cost (or, conversely, don't get cached past edit).
-- **`--root <DIR>`** flag to serve a directory other than the cwd.
 - **Config file** (`webrunner.toml`) for repeated invocations.
 
 ### Distribution
