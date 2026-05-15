@@ -23,6 +23,7 @@ use crate::mime::mime_for_ext_owned;
 pub struct AppState {
     pub root: PathBuf,
     pub config: Arc<CliConfig>,
+    pub access_log: Option<Arc<crate::access_log::AccessLog>>,
 }
 
 pub async fn handle_request(

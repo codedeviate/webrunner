@@ -1,6 +1,10 @@
+use axum::extract::{ConnectInfo, State};
+use axum::http::{header, Request};
+use axum::middleware::Next;
+use axum::response::Response;
 use std::fs::OpenOptions;
 use std::io::{stdout, Write};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 
 use time::macros::format_description;
@@ -23,7 +27,6 @@ impl std::fmt::Debug for AccessLog {
 impl AccessLog {
     /// Open the access log sink. `target == "-"` selects stdout; any
     /// other value is opened as a file in append+create mode.
-    #[allow(dead_code)] // wired in Task 4
     pub fn open(target: &str) -> Result<Self, String> {
         let writer: Box<dyn Write + Send> = if target == "-" {
             Box::new(stdout())
@@ -42,7 +45,6 @@ impl AccessLog {
 
     /// Write one log line. Errors are swallowed — a dev tool should not
     /// crash on disk-full or a closed stdout.
-    #[allow(dead_code)] // wired in Task 4
     pub fn write_line(&self, line: &str) {
         if let Ok(mut w) = self.writer.lock() {
             let _ = writeln!(w, "{}", line);
@@ -55,7 +57,6 @@ impl AccessLog {
 ///
 /// Spec: `%h - %u [%t] "%r" %>s %b "%{Referer}i" "%{User-Agent}i"`.
 /// `%l` (ident) is always `-`. `%b` is `-` when `body_size == 0`.
-#[allow(dead_code)] // wired in Task 4
 #[allow(clippy::too_many_arguments)] // mirrors Combined Log Format field set
 pub fn format_combined(
     remote_ip: IpAddr,
@@ -89,6 +90,61 @@ pub fn format_combined(
         referer.unwrap_or("-"),
         user_agent.unwrap_or("-"),
     )
+}
+
+pub async fn middleware(
+    State(state): State<crate::handler::AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let Some(log) = state.access_log.clone() else {
+        return next.run(req).await;
+    };
+
+    let method = req.method().to_string();
+    let uri = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or("/")
+        .to_string();
+    let version = format!("{:?}", req.version());
+    let referer = req
+        .headers()
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let user_agent = req
+        .headers()
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    let response = next.run(req).await;
+
+    let status = response.status().as_u16();
+    let body_size = response
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let line = format_combined(
+        peer.ip(),
+        None,
+        &method,
+        &uri,
+        &version,
+        status,
+        body_size,
+        referer.as_deref(),
+        user_agent.as_deref(),
+    );
+    log.write_line(&line);
+
+    response
 }
 
 #[cfg(test)]
