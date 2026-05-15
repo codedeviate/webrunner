@@ -97,6 +97,8 @@ webrunner [OPTIONS]
       --log-level <LEVEL>    off | warn | info | debug. Default: info
       --log <PATH>           Access log file, or - for stdout.
                              Combined Log Format.
+      --compression <ON|OFF> Enable brotli / gzip compression for
+                             text-shaped static files. Default: on
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -116,6 +118,12 @@ fatal startup errors.
 line per request. `--log -` writes to stdout instead. Access logs are
 separate from `--log-level`: setting `--log-level off` does not
 silence them.
+
+**Compression.** webrunner serves text-shaped responses (`text/*`,
+`application/json`, `application/javascript`, SVG, wasm) compressed
+with brotli or gzip when the client's `Accept-Encoding` allows it and
+the response is at least 256 bytes. `--compression off` disables this
+entirely. Range requests are always served uncompressed.
 
 ## Examples
 

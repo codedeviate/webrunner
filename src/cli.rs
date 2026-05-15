@@ -58,6 +58,11 @@ pub struct CliConfig {
     #[arg(long, value_name = "PATH")]
     pub log: Option<String>,
 
+    /// Enable compression for text-shaped static files (gzip + brotli).
+    /// Default: on.
+    #[arg(long, value_enum, default_value_t = crate::compression::Compression::On)]
+    pub compression: crate::compression::Compression,
+
     /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
     /// repeatable. Default: 0.0.0.0,::
     #[arg(long, value_delimiter = ',')]
@@ -413,6 +418,24 @@ mod tests {
     fn test_log_dash_parses() {
         let cfg = CliConfig::parse_from(["webrunner", "--log", "-"]);
         assert_eq!(cfg.log.as_deref(), Some("-"));
+    }
+
+    #[test]
+    fn test_compression_default_on() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert_eq!(cfg.compression, crate::compression::Compression::On);
+    }
+
+    #[test]
+    fn test_compression_off_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--compression", "off"]);
+        assert_eq!(cfg.compression, crate::compression::Compression::Off);
+    }
+
+    #[test]
+    fn test_compression_invalid_rejected() {
+        let result = CliConfig::try_parse_from(["webrunner", "--compression", "maybe"]);
+        assert!(result.is_err());
     }
 
     #[test]

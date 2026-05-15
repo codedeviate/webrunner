@@ -2,6 +2,7 @@ mod access_log;
 mod auth;
 mod cgi;
 mod cli;
+mod compression;
 mod handler;
 mod htaccess;
 mod logging;

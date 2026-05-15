@@ -164,7 +164,7 @@ async fn serve_path(
 }
 
 async fn serve_static_file(
-    _state: &AppState,
+    state: &AppState,
     path: &Path,
     _req_path: &str,
     req_headers: &HeaderMap,
@@ -178,8 +178,46 @@ async fn serve_static_file(
     let file_size = meta.len();
     let modified = meta.modified().unwrap_or(UNIX_EPOCH);
     let modified_secs = modified.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    let etag = build_etag(file_size, modified_secs);
     let last_modified = http_date(modified);
+
+    // Compute content_type up front — needed for compression eligibility AND response.
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let content_type_raw = mime_for_ext_owned(ext, &htaccess.add_types);
+    let content_type = if let Some(charset) = &htaccess.add_default_charset {
+        if !content_type_raw.contains("charset") {
+            format!("{}; charset={}", content_type_raw, charset)
+        } else {
+            content_type_raw
+        }
+    } else {
+        content_type_raw
+    };
+
+    let base_etag = build_etag(file_size, modified_secs);
+
+    // Decide compression eligibility BEFORE finalising the ETag.
+    let want_compress = state.config.compression == crate::compression::Compression::On
+        && crate::compression::is_compressible(&content_type)
+        && file_size >= crate::compression::MIN_COMPRESS_SIZE
+        && !req_headers.contains_key(header::RANGE);
+    let chosen_encoding = if want_compress {
+        req_headers
+            .get(header::ACCEPT_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .and_then(crate::compression::pick_encoding)
+    } else {
+        None
+    };
+
+    // ETag is base + suffix when compression will be applied.
+    let etag = match chosen_encoding {
+        Some(enc) => format!(
+            "{}{}\"",
+            &base_etag[..base_etag.len() - 1],
+            enc.etag_suffix(),
+        ),
+        None => base_etag.clone(),
+    };
 
     // ETag / If-None-Match check (takes precedence over If-Modified-Since)
     if let Some(inm) = req_headers.get(header::IF_NONE_MATCH) {
@@ -200,19 +238,7 @@ async fn serve_static_file(
         }
     }
 
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let content_type = mime_for_ext_owned(ext, &htaccess.add_types);
-    let content_type = if let Some(charset) = &htaccess.add_default_charset {
-        if !content_type.contains("charset") {
-            format!("{}; charset={}", content_type, charset)
-        } else {
-            content_type
-        }
-    } else {
-        content_type
-    };
-
-    // Range request
+    // Range request — uses the un-suffixed ETag, skips compression by design.
     if let Some(range_header) = req_headers.get(header::RANGE) {
         let range_str = range_header.to_str().unwrap_or("");
         if let Some((start, end)) = parse_range(range_str, file_size) {
@@ -223,7 +249,7 @@ async fn serve_static_file(
                 .header(header::CONTENT_TYPE, content_type)
                 .header(header::CONTENT_LENGTH, length)
                 .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start, end, file_size))
-                .header(header::ETAG, &etag)
+                .header(header::ETAG, &base_etag)
                 .header(header::LAST_MODIFIED, &last_modified)
                 .body(Body::from(data))
                 .unwrap();
@@ -238,14 +264,26 @@ async fn serve_static_file(
         }
     };
 
-    Response::builder()
+    let (body_bytes, encoding_header): (Vec<u8>, Option<&'static str>) = match chosen_encoding {
+        Some(enc) => (crate::compression::compress(enc, &data), Some(enc.header_value())),
+        None => (data, None),
+    };
+
+    let mut builder = Response::builder()
         .status(200)
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_LENGTH, data.len())
-        .header(header::ETAG, etag)
-        .header(header::LAST_MODIFIED, last_modified)
-        .body(Body::from(data))
-        .unwrap()
+        .header(header::CONTENT_TYPE, &content_type)
+        .header(header::CONTENT_LENGTH, body_bytes.len())
+        .header(header::ETAG, &etag)
+        .header(header::LAST_MODIFIED, &last_modified);
+
+    if crate::compression::is_compressible(&content_type) {
+        builder = builder.header(header::VARY, "Accept-Encoding");
+    }
+    if let Some(enc_name) = encoding_header {
+        builder = builder.header(header::CONTENT_ENCODING, enc_name);
+    }
+
+    builder.body(Body::from(body_bytes)).unwrap()
 }
 
 #[allow(clippy::too_many_arguments)]
