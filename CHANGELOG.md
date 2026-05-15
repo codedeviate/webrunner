@@ -27,8 +27,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (default 30 seconds; `0` disables). Previously fixed at 30
   seconds.
 - `--log-level <off|warn|info|debug>` flag for filtering output.
-  Default `info` preserves prior behaviour. Internally migrates the
-  scattered `eprintln!` / `println!` calls onto the `log` crate.
+  Default `info` preserves prior behaviour.
 
 ### Changed
 
