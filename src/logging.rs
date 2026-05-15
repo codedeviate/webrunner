@@ -46,7 +46,6 @@ static LOGGER: WebrunnerLogger = WebrunnerLogger;
 /// parsing and before any leveled output. The three fatal-startup
 /// `eprintln!("Error: ...")` paths in `main.rs` do not use the logger
 /// and remain unconditional.
-#[allow(dead_code)] // wired in Task 3
 pub fn init(level: LevelFilter) {
     log::set_logger(&LOGGER).expect("logger init");
     log::set_max_level(level);
