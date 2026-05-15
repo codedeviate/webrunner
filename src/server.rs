@@ -115,7 +115,8 @@ fn bind_listeners_for_port(
         }
     }
     if listeners.is_empty() || (!explicit && !v4_ok) {
-        return Err(format!("{}: no bindable address (tried: {:?})", label, ips));
+        let tried: Vec<String> = ips.iter().map(|ip| ip.to_string()).collect();
+        return Err(format!("{}: no bindable address (tried: {})", label, tried.join(", ")));
     }
     Ok((listeners, addrs))
 }
@@ -228,7 +229,16 @@ mod tests {
 
     async fn http_get_status(addr: SocketAddr) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        // Retry connect for up to ~1s so the test isn't tied to acceptor wake-up timing on slow CI.
+        let mut stream = None;
+        for _ in 0..20 {
+            if let Ok(s) = tokio::net::TcpStream::connect(addr).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let mut stream = stream.expect("connect (after retry)");
         stream.write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n").await.unwrap();
         let mut buf = Vec::with_capacity(256);
         let _ = tokio::time::timeout(
@@ -254,8 +264,6 @@ mod tests {
         let server = tokio::spawn(async move {
             bind_and_serve(app, vec![v4_listener, v6_listener], vec![], server_handle).await
         });
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
 
         let v4_response = http_get_status(v4_addr).await;
         let v6_response = http_get_status(v6_addr).await;
