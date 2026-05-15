@@ -53,6 +53,11 @@ pub struct CliConfig {
     #[arg(long, value_enum, default_value_t = crate::logging::LogLevel::Info, ignore_case = true)]
     pub log_level: crate::logging::LogLevel,
 
+    /// Path to access-log file, or `-` for stdout. Combined Log Format.
+    /// Default: access logs disabled.
+    #[arg(long, value_name = "PATH")]
+    pub log: Option<String>,
+
     /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
     /// repeatable. Default: 0.0.0.0,::
     #[arg(long, value_delimiter = ',')]
@@ -390,6 +395,24 @@ mod tests {
     fn test_log_level_invalid_rejected() {
         let result = CliConfig::try_parse_from(["webrunner", "--log-level", "garbage"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_log_default_none() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert!(cfg.log.is_none());
+    }
+
+    #[test]
+    fn test_log_path_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--log", "access.log"]);
+        assert_eq!(cfg.log.as_deref(), Some("access.log"));
+    }
+
+    #[test]
+    fn test_log_dash_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--log", "-"]);
+        assert_eq!(cfg.log.as_deref(), Some("-"));
     }
 
     #[test]
