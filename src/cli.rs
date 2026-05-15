@@ -53,6 +53,7 @@ pub struct CliConfig {
     pub root: Option<String>,
 
     /// Directory to serve (positional). Same semantics as --root.
+    /// Mutually exclusive with --root; enforced by `CliConfig::validate`.
     #[arg(value_name = "DIR")]
     pub root_pos: Option<String>,
 
