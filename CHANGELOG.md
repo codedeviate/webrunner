@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Default `info` preserves prior behaviour.
 - `--log <PATH>` (or `--log -`) flag to write per-request access log
   lines in Apache Combined Log Format. Disabled by default.
+- Conditional GET support for static files via `If-Modified-Since`
+  (complements the existing `If-None-Match` / ETag handling).
+  Returns 304 when the file has not been modified since the
+  client's reported time.
 
 ### Changed
 
