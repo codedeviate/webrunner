@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - `--cgi-timeout <SECS>` flag to configure the CGI script timeout
   (default 30 seconds; `0` disables). Previously fixed at 30
   seconds.
+- `--log-level <off|warn|info|debug>` flag for filtering output.
+  Default `info` preserves prior behaviour. Internally migrates the
+  scattered `eprintln!` / `println!` calls onto the `log` crate.
 
 ### Changed
 
@@ -34,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   can now reach the server out of the box. On systems where IPv6 is
   disabled at the kernel level, the IPv6 listener is skipped with a
   stderr warning and the server continues on IPv4.
+- Output now routes via the `log` crate. Error/warning messages go to
+  stderr (unchanged); informational messages (startup banner, shutdown
+  notice, cert generation) go to stdout. Existing message prefixes
+  (`[CGI ERROR]`, `[.htaccess]`, `[auth]`, etc.) are preserved.
 
 ### Fixed
 
