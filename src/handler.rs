@@ -190,7 +190,11 @@ async fn serve_static_file(
         // Per RFC 7232 §6, do NOT consult If-Modified-Since when INM is present.
     } else if let Some(ims) = req_headers.get(header::IF_MODIFIED_SINCE) {
         if let Some(client_time) = parse_imf_fixdate(ims.to_str().unwrap_or("")) {
-            if modified <= client_time {
+            // Compare at second precision: HTTP dates are second-precision and the
+            // Last-Modified header we sent was truncated by http_date(). Comparing
+            // raw nanosecond-precision SystemTimes would mis-fire same-second cases.
+            let client_secs = client_time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            if modified_secs <= client_secs {
                 return Response::builder().status(304).body(Body::empty()).unwrap();
             }
         }
