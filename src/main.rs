@@ -3,6 +3,7 @@ mod cgi;
 mod cli;
 mod handler;
 mod htaccess;
+mod logging;
 mod mime;
 mod rewrite;
 mod server;

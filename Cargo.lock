@@ -1418,6 +1418,7 @@ dependencies = [
  "bytes",
  "clap",
  "http-body-util",
+ "log",
  "md-5",
  "rcgen",
  "regex",
