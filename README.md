@@ -95,6 +95,8 @@ webrunner [OPTIONS]
       --cgi-timeout <SECS>   CGI script timeout. 0 disables.
                              Default: 30
       --log-level <LEVEL>    off | warn | info | debug. Default: info
+      --log <PATH>           Access log file, or - for stdout.
+                             Combined Log Format.
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -109,6 +111,11 @@ webrunner prints to stderr (`error`, `warn`) and stdout (`info`,
 `debug`). Default level is `info`. Use `--log-level warn` to suppress
 the startup banner, or `--log-level off` to silence everything except
 fatal startup errors.
+
+**Access logs.** Pass `--log <PATH>` to write one Combined Log Format
+line per request. `--log -` writes to stdout instead. Access logs are
+separate from `--log-level`: setting `--log-level off` does not
+silence them.
 
 ## Examples
 

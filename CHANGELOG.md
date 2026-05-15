@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   seconds.
 - `--log-level <off|warn|info|debug>` flag for filtering output.
   Default `info` preserves prior behaviour.
+- `--log <PATH>` (or `--log -`) flag to write per-request access log
+  lines in Apache Combined Log Format. Disabled by default.
 
 ### Changed
 
@@ -46,6 +48,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - CGI children are now killed when the timeout fires. Previously
   the script remained running after the 504 response was sent,
   leaving an orphaned process until it finished on its own.
+- `REMOTE_ADDR` in CGI env now reflects the actual peer IP.
+  Previously hard-coded to `127.0.0.1`.
 
 ## [0.4.0] - 2026-05-15
 
