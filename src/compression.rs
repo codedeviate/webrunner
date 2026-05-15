@@ -65,7 +65,6 @@ pub fn is_compressible(mime: &str) -> bool {
 }
 
 /// Compress `data` with the chosen encoding. Returns the compressed bytes.
-#[allow(dead_code)] // wired in Task 3
 pub fn compress(encoding: Encoding, data: &[u8]) -> Vec<u8> {
     match encoding {
         Encoding::Gzip => {
@@ -86,7 +85,6 @@ pub fn compress(encoding: Encoding, data: &[u8]) -> Vec<u8> {
 }
 
 /// Minimum payload size for compression to be worthwhile.
-#[allow(dead_code)] // wired in Task 3
 pub const MIN_COMPRESS_SIZE: u64 = 256;
 
 #[cfg(test)]
