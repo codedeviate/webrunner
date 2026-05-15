@@ -37,6 +37,14 @@ pub struct CliConfig {
     #[arg(long, value_delimiter = ',')]
     pub cgi: Vec<String>,
 
+    /// File extensions to NEVER execute as CGI, removing them from the
+    /// always-on set. Use to serve `.pl` or `.php` files verbatim instead
+    /// of running them. Accepted values: js, ts, pl, php. Case-insensitive.
+    /// Comma-separated and/or repeated. Mutually exclusive (per-extension)
+    /// with --cgi: passing the same value to both is an error.
+    #[arg(long, value_delimiter = ',')]
+    pub no_cgi: Vec<String>,
+
     /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
     /// repeatable. Default: 0.0.0.0,::
     #[arg(long, value_delimiter = ',')]
@@ -69,9 +77,10 @@ impl CliConfig {
         self.https || (self.cert.is_some() && self.key.is_some())
     }
 
-    /// Validate CLI arguments. Normalises `cgi` and `bind` in place,
-    /// fills the default bind set, records `bind_explicit`, and rejects
-    /// passing both `--root` and the positional <DIR> together.
+    /// Validate CLI arguments. Normalises `cgi`, `no_cgi`, and `bind`
+    /// in place, fills the default bind set, records `bind_explicit`,
+    /// rejects passing both `--root` and the positional <DIR> together,
+    /// and rejects any extension appearing in both `--cgi` and `--no-cgi`.
     /// Returns an error message if invalid.
     pub fn validate(&mut self) -> Result<(), String> {
         match (self.cert.as_ref(), self.key.as_ref()) {
@@ -95,6 +104,30 @@ impl CliConfig {
             }
         }
         self.cgi = normalised;
+
+        let mut no_cgi_normalised: Vec<String> = Vec::new();
+        for raw in &self.no_cgi {
+            let lower = raw.to_lowercase();
+            if !ALLOWED_CGI.contains(&lower.as_str()) {
+                return Err(format!(
+                    "--no-cgi: unknown extension '{}' (allowed: js, ts, pl, php)",
+                    raw
+                ));
+            }
+            if !no_cgi_normalised.contains(&lower) {
+                no_cgi_normalised.push(lower);
+            }
+        }
+        self.no_cgi = no_cgi_normalised;
+
+        for ext in &self.no_cgi {
+            if self.cgi.contains(ext) {
+                return Err(format!(
+                    "--cgi and --no-cgi both list '{}'; pick one",
+                    ext
+                ));
+            }
+        }
 
         // Must check before filling the default so bind_explicit reflects user input.
         self.bind_explicit = !self.bind.is_empty();
@@ -245,6 +278,54 @@ mod tests {
         let err = cfg.validate().unwrap_err();
         assert!(err.contains("--cgi"));
         assert!(err.contains("html"));
+    }
+
+    #[test]
+    fn test_no_cgi_single_value_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--no-cgi", "pl"]);
+        assert_eq!(cfg.no_cgi, vec!["pl".to_string()]);
+    }
+
+    #[test]
+    fn test_no_cgi_comma_list_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--no-cgi", "pl,php"]);
+        assert_eq!(cfg.no_cgi, vec!["pl".to_string(), "php".to_string()]);
+    }
+
+    #[test]
+    fn test_no_cgi_repeated_flag_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--no-cgi", "pl", "--no-cgi", "php"]);
+        assert_eq!(cfg.no_cgi, vec!["pl".to_string(), "php".to_string()]);
+    }
+
+    #[test]
+    fn test_no_cgi_validate_lowercases_and_dedups() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--no-cgi", "PL,Pl"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.no_cgi, vec!["pl".to_string()]);
+    }
+
+    #[test]
+    fn test_no_cgi_validate_rejects_unknown() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--no-cgi", "html"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--no-cgi"));
+        assert!(err.contains("html"));
+    }
+
+    #[test]
+    fn test_no_cgi_validate_accepts_js_ts_as_noop() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--no-cgi", "js,ts"]);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_no_cgi_validate_rejects_conflict_with_cgi() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--cgi", "pl", "--no-cgi", "pl"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--cgi"));
+        assert!(err.contains("--no-cgi"));
+        assert!(err.contains("pl"));
     }
 
     #[test]
