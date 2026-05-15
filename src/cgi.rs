@@ -43,7 +43,7 @@ pub fn parse_cgi_output(raw: &[u8]) -> CgiOutput {
     } else if let Some(pos) = find_subsequence(raw, b"\n\n") {
         (&raw[..pos], &raw[pos + 2..])
     } else {
-        eprintln!("[CGI ERROR] No blank line found in CGI output");
+        log::error!("[CGI ERROR] No blank line found in CGI output");
         return CgiOutput {
             status: 500,
             headers: vec![],
@@ -138,7 +138,7 @@ pub async fn run_cgi(
     let (interpreter, args) = match interpreter_for(ext) {
         Some(v) => v,
         None => {
-            eprintln!("[CGI ERROR] No interpreter for extension: {}", ext);
+            log::error!("[CGI ERROR] No interpreter for extension: {}", ext);
             return CgiOutput {
                 status: 500,
                 headers: vec![],
@@ -172,7 +172,7 @@ pub async fn run_cgi(
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[CGI ERROR] Failed to spawn {}: {}", interpreter, e);
+                log::error!("[CGI ERROR] Failed to spawn {}: {}", interpreter, e);
                 return CgiOutput {
                     status: 500,
                     headers: vec![],
@@ -212,7 +212,7 @@ pub async fn run_cgi(
         if !stderr_bytes.is_empty() {
             let stderr_str = String::from_utf8_lossy(&stderr_bytes);
             for line in stderr_str.lines() {
-                eprintln!("[CGI ERROR] {}", line);
+                log::error!("[CGI ERROR] {}", line);
             }
         }
 
@@ -225,7 +225,7 @@ pub async fn run_cgi(
         match tokio::time::timeout(Duration::from_secs(timeout_secs), run).await {
             Ok(output) => output,
             Err(_) => {
-                eprintln!(
+                log::error!(
                     "[CGI ERROR] Script timed out after {} seconds: {}",
                     timeout_secs,
                     script_path.display(),

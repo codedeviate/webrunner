@@ -39,7 +39,7 @@ pub async fn run(config: CliConfig, root: PathBuf) -> Result<(), String> {
     let shutdown_handle = handle.clone();
     tokio::spawn(async move {
         shutdown_signal().await;
-        eprintln!("\nShutting down gracefully...");
+        log::info!("\nShutting down gracefully...");
         shutdown_handle.graceful_shutdown(Some(Duration::from_secs(5)));
     });
 
@@ -70,11 +70,11 @@ pub async fn run(config: CliConfig, root: PathBuf) -> Result<(), String> {
         None
     };
 
-    println!("webrunner v{}", env!("CARGO_PKG_VERSION"));
-    println!("Serving {}", root.display());
-    println!("http://localhost:{}", config.port);
+    log::info!("webrunner v{}", env!("CARGO_PKG_VERSION"));
+    log::info!("Serving {}", root.display());
+    log::info!("http://localhost:{}", config.port);
     if let Some(ref fp) = fingerprint {
-        println!("https://localhost:{}  (self-signed, fingerprint: {})", config.https_port, fp);
+        log::info!("https://localhost:{}  (self-signed, fingerprint: {})", config.https_port, fp);
     }
     let mut bound_urls: Vec<String> = Vec::new();
     for a in &http_addrs {
@@ -83,8 +83,8 @@ pub async fn run(config: CliConfig, root: PathBuf) -> Result<(), String> {
     for a in &https_addrs {
         bound_urls.push(format_url("https", a));
     }
-    println!("bound: {}", bound_urls.join(", "));
-    println!("Press Ctrl+C to stop.");
+    log::info!("bound: {}", bound_urls.join(", "));
+    log::info!("Press Ctrl+C to stop.");
 
     bind_and_serve(app, http_listeners, https_pairs, handle).await
 }
@@ -110,7 +110,7 @@ fn bind_listeners_for_port(
                 if explicit {
                     return Err(format!("failed to bind {} {}: {}", label, addr, e));
                 }
-                eprintln!("warn: skipping {} {} ({} unavailable: {})", label, addr, ip, e);
+                log::warn!("warn: skipping {} {} ({} unavailable: {})", label, addr, ip, e);
             }
         }
     }

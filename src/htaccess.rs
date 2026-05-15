@@ -145,7 +145,7 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                     if let Ok(code) = tokens[1].parse::<u16>() {
                         cfg.error_documents.insert(code, tokens[2].to_string());
                     } else {
-                        eprintln!("[.htaccess] {}:{}: invalid error code '{}'", file_path, line_no + 1, tokens[1]);
+                        log::warn!("[.htaccess] {}:{}: invalid error code '{}'", file_path, line_no + 1, tokens[1]);
                     }
                 }
             }
@@ -178,7 +178,7 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 } else if tokens.len() == 3 {
                     (302, tokens[1].to_string(), tokens[2].to_string())
                 } else {
-                    eprintln!("[.htaccess] {}:{}: malformed Redirect", file_path, line_no + 1);
+                    log::warn!("[.htaccess] {}:{}: malformed Redirect", file_path, line_no + 1);
                     continue;
                 };
                 cfg.redirects.push(RedirectRule { status, from, to });
@@ -210,7 +210,7 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 }
             }
             _ => {
-                eprintln!("[.htaccess] {}:{}: unknown directive '{}', skipping", file_path, line_no + 1, tokens[0]);
+                log::warn!("[.htaccess] {}:{}: unknown directive '{}', skipping", file_path, line_no + 1, tokens[0]);
             }
         }
     }

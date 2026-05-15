@@ -59,7 +59,7 @@ pub async fn handle_request(
     let htaccess = match parse_htaccess_for_path(&state.root, &htaccess_dir) {
         Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("[.htaccess] error: {}", e);
+            log::error!("[.htaccess] error: {}", e);
             crate::htaccess::HtaccessConfig::default()
         }
     };
@@ -74,7 +74,7 @@ pub async fn handle_request(
             }
         } else {
             // auth_required but no AuthUserFile configured — deny access
-            eprintln!("[auth] auth_required but no AuthUserFile configured, denying access");
+            log::warn!("[auth] auth_required but no AuthUserFile configured, denying access");
             return error_response(403, "Forbidden");
         }
     }
@@ -135,7 +135,7 @@ async fn serve_path(
                         .unwrap();
                 }
                 Err(e) => {
-                    eprintln!("[static] directory listing error: {}", e);
+                    log::error!("[static] directory listing error: {}", e);
                     return error_response(500, "Internal Server Error");
                 }
             }
@@ -216,7 +216,7 @@ async fn serve_static_file(
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("[static] read error {:?}: {}", path, e);
+            log::error!("[static] read error {:?}: {}", path, e);
             return error_response(500, "Internal Server Error");
         }
     };
@@ -302,7 +302,7 @@ fn check_basic_auth(headers: &HeaderMap, user_file: &str) -> bool {
     let entries = match parse_htpasswd_file(user_file) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("[auth] cannot read htpasswd file: {}", e);
+            log::warn!("[auth] cannot read htpasswd file: {}", e);
             return false;
         }
     };
