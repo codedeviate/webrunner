@@ -1,4 +1,6 @@
 use clap::Parser;
+use std::net::IpAddr;
+use std::str::FromStr;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "webrunner", version, about = "Development web server with CGI support")]
@@ -34,6 +36,17 @@ pub struct CliConfig {
     #[arg(long, value_delimiter = ',')]
     pub cgi: Vec<String>,
 
+    /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
+    /// repeatable. Default: 0.0.0.0,::
+    #[arg(long, value_delimiter = ',')]
+    pub bind: Vec<String>,
+
+    /// True iff the user explicitly passed --bind. Drives fail-hard vs.
+    /// fail-soft semantics in server::run. Derived in validate(); not
+    /// parsed from CLI.
+    #[clap(skip)]
+    pub bind_explicit: bool,
+
     /// Print usage examples and exit
     #[arg(long)]
     pub examples: bool,
@@ -45,7 +58,8 @@ impl CliConfig {
         self.https || (self.cert.is_some() && self.key.is_some())
     }
 
-    /// Validate CLI arguments. Normalises `cgi` in place (lowercase, dedup).
+    /// Validate CLI arguments. Normalises `cgi` and `bind` in place,
+    /// fills the default bind set, and records `bind_explicit`.
     /// Returns an error message if invalid.
     pub fn validate(&mut self) -> Result<(), String> {
         match (self.cert.as_ref(), self.key.as_ref()) {
@@ -54,11 +68,11 @@ impl CliConfig {
             _ => {}
         }
 
-        const ALLOWED: &[&str] = &["js", "ts", "pl", "php"];
+        const ALLOWED_CGI: &[&str] = &["js", "ts", "pl", "php"];
         let mut normalised: Vec<String> = Vec::new();
         for raw in &self.cgi {
             let lower = raw.to_lowercase();
-            if !ALLOWED.contains(&lower.as_str()) {
+            if !ALLOWED_CGI.contains(&lower.as_str()) {
                 return Err(format!(
                     "--cgi: unknown extension '{}' (allowed: js, ts, pl, php)",
                     raw
@@ -69,6 +83,27 @@ impl CliConfig {
             }
         }
         self.cgi = normalised;
+
+        // Must check before filling the default so bind_explicit reflects user input.
+        self.bind_explicit = !self.bind.is_empty();
+        if self.bind.is_empty() {
+            self.bind = vec!["0.0.0.0".to_string(), "::".to_string()];
+        }
+        let mut canonical: Vec<String> = Vec::new();
+        for raw in &self.bind {
+            let ip = IpAddr::from_str(raw).map_err(|_| {
+                format!(
+                    "--bind: invalid IP literal '{}' (hostnames and ports not allowed here)",
+                    raw
+                )
+            })?;
+            let canon = ip.to_string();
+            if !canonical.contains(&canon) {
+                canonical.push(canon);
+            }
+        }
+        self.bind = canonical;
+
         Ok(())
     }
 }
@@ -169,5 +204,91 @@ mod tests {
         let err = cfg.validate().unwrap_err();
         assert!(err.contains("--cgi"));
         assert!(err.contains("html"));
+    }
+
+    #[test]
+    fn test_bind_default_empty_before_validate() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert!(cfg.bind.is_empty());
+        assert!(!cfg.bind_explicit);
+    }
+
+    #[test]
+    fn test_bind_comma_list_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1,::1"]);
+        assert_eq!(cfg.bind, vec!["127.0.0.1".to_string(), "::1".to_string()]);
+    }
+
+    #[test]
+    fn test_bind_repeated_flag_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1", "--bind", "::1"]);
+        assert_eq!(cfg.bind, vec!["127.0.0.1".to_string(), "::1".to_string()]);
+    }
+
+    #[test]
+    fn test_bind_validate_fills_default() {
+        let mut cfg = CliConfig::parse_from(["webrunner"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.bind, vec!["0.0.0.0".to_string(), "::".to_string()]);
+        assert!(!cfg.bind_explicit);
+    }
+
+    #[test]
+    fn test_bind_validate_marks_explicit() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.bind, vec!["127.0.0.1".to_string()]);
+        assert!(cfg.bind_explicit);
+    }
+
+    #[test]
+    fn test_bind_validate_canonicalises_ipv6() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "0:0:0:0:0:0:0:1"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.bind, vec!["::1".to_string()]);
+    }
+
+    #[test]
+    fn test_bind_validate_dedupes() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1,127.0.0.1"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.bind, vec!["127.0.0.1".to_string()]);
+    }
+
+    #[test]
+    fn test_bind_validate_rejects_hostname() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "localhost"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--bind"));
+        assert!(err.contains("localhost"));
+    }
+
+    #[test]
+    fn test_bind_validate_rejects_port_suffix() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1:8080"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--bind"));
+        assert!(err.contains("127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn test_bind_validate_rejects_garbage() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "not-an-ip"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--bind"));
+        assert!(err.contains("not-an-ip"));
+    }
+
+    #[test]
+    fn test_bind_validate_accepts_ipv4_and_ipv6_mixed() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--bind", "0.0.0.0,::,127.0.0.1,::1"]);
+        cfg.validate().unwrap();
+        assert_eq!(cfg.bind, vec![
+            "0.0.0.0".to_string(),
+            "::".to_string(),
+            "127.0.0.1".to_string(),
+            "::1".to_string(),
+        ]);
+        assert!(cfg.bind_explicit);
     }
 }

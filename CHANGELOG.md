@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- `--bind <ADDR[,ADDR...]>` flag to choose the listener address(es).
+  Accepts IPv4 and IPv6 literals; comma-separated and/or repeatable.
+
+### Changed
+
+- webrunner now binds to `0.0.0.0` and `::` by default (previously
+  `0.0.0.0` only). Existing IPv4 access is unaffected; IPv6 clients
+  can now reach the server out of the box. On systems where IPv6 is
+  disabled at the kernel level, the IPv6 listener is skipped with a
+  stderr warning and the server continues on IPv4.
+
 ## [0.4.0] - 2026-05-15
 
 ### Added

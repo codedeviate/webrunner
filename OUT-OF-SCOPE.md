@@ -27,14 +27,14 @@ entry rather than leaving a crossed-out line here.
 - **HTTP→HTTPS redirect.** When both listeners are active, optionally redirect
   plain HTTP to HTTPS instead of serving on both.
 - **HSTS header** on HTTPS responses (`Strict-Transport-Security`), opt-in.
-- **IPv6 binding.** Currently binds `0.0.0.0`; should also bind `::` or take a
-  configurable bind address.
 - **Range requests** (`Range:` / `206 Partial Content`) for static files —
   matters for video and large downloads.
 - **Conditional requests** — `ETag`, `Last-Modified`, `If-None-Match`,
   `If-Modified-Since` for static files.
 - **Compression** — `Content-Encoding: gzip` / `br` for compressible MIME
   types, gated by `Accept-Encoding`.
+- **Separate `--bind-http` / `--bind-https`** for asymmetric bind sets
+  between protocols (currently `--bind` applies to both).
 
 ### `.htaccess` directives
 
@@ -60,7 +60,6 @@ entry rather than leaving a crossed-out line here.
 - **Configurable log level** (currently warnings to stderr; nothing else).
 - **File watching / hot reload** of `.htaccess` so edits don't require
   request-time re-parse cost (or, conversely, don't get cached past edit).
-- **`--bind <ADDR>`** flag to choose the bind address.
 - **`--root <DIR>`** flag to serve a directory other than the cwd.
 - **Config file** (`webrunner.toml`) for repeated invocations.
 
