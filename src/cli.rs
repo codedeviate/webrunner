@@ -49,6 +49,10 @@ pub struct CliConfig {
     #[arg(long, value_name = "SECS", default_value_t = 30)]
     pub cgi_timeout: u64,
 
+    /// Log level. Default: info.
+    #[arg(long, value_enum, default_value_t = crate::logging::LogLevel::Info, ignore_case = true)]
+    pub log_level: crate::logging::LogLevel,
+
     /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
     /// repeatable. Default: 0.0.0.0,::
     #[arg(long, value_delimiter = ',')]
@@ -355,6 +359,36 @@ mod tests {
     #[test]
     fn test_cgi_timeout_negative_rejected() {
         let result = CliConfig::try_parse_from(["webrunner", "--cgi-timeout", "-5"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_log_level_default_info() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert_eq!(cfg.log_level, crate::logging::LogLevel::Info);
+    }
+
+    #[test]
+    fn test_log_level_warn_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--log-level", "warn"]);
+        assert_eq!(cfg.log_level, crate::logging::LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_log_level_off_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--log-level", "off"]);
+        assert_eq!(cfg.log_level, crate::logging::LogLevel::Off);
+    }
+
+    #[test]
+    fn test_log_level_case_insensitive() {
+        let cfg = CliConfig::parse_from(["webrunner", "--log-level", "WARN"]);
+        assert_eq!(cfg.log_level, crate::logging::LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_log_level_invalid_rejected() {
+        let result = CliConfig::try_parse_from(["webrunner", "--log-level", "garbage"]);
         assert!(result.is_err());
     }
 

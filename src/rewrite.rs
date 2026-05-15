@@ -41,7 +41,7 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
         let re = match re {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("[rewrite] invalid pattern '{}': {}", rule.pattern, e);
+                log::warn!("[rewrite] invalid pattern '{}': {}", rule.pattern, e);
                 continue;
             }
         };

@@ -94,6 +94,7 @@ webrunner [OPTIONS]
                              Mutually exclusive with --cgi per extension.
       --cgi-timeout <SECS>   CGI script timeout. 0 disables.
                              Default: 30
+      --log-level <LEVEL>    off | warn | info | debug. Default: info
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -101,6 +102,13 @@ webrunner [OPTIONS]
 
 Run `webrunner --examples` for a complete cookbook covering CGI, `.htaccess`,
 auth, rewrites, and HTTPS.
+
+### Logging
+
+webrunner prints to stderr (`error`, `warn`) and stdout (`info`,
+`debug`). Default level is `info`. Use `--log-level warn` to suppress
+the startup banner, or `--log-level off` to silence everything except
+fatal startup errors.
 
 ## Examples
 

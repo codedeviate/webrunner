@@ -3,6 +3,7 @@ mod cgi;
 mod cli;
 mod handler;
 mod htaccess;
+mod logging;
 mod mime;
 mod rewrite;
 mod server;
@@ -26,6 +27,8 @@ async fn main() {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+
+    logging::init(config.log_level.to_filter());
 
     // Warn about missing interpreters
     check_interpreter("perl",  &["pl"]);
@@ -137,7 +140,7 @@ CGI SCRIPTS
 /// Check if an interpreter is available in PATH. Warns if not found.
 fn check_interpreter(binary: &str, extensions: &[&str]) {
     if which(binary).is_none() {
-        eprintln!("Warning: '{}' not found in PATH — .{} scripts will return 500",
+        log::warn!("Warning: '{}' not found in PATH — .{} scripts will return 500",
             binary, extensions.join(", ."));
     }
 }

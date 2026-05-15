@@ -61,7 +61,7 @@ pub fn ensure_cert(cert: Option<&str>, key: Option<&str>) -> Result<CertPaths, S
             let key_path = config_dir.join("key.pem");
 
             if !cert_path.exists() || !key_path.exists() {
-                eprintln!("Generating self-signed certificate in {:?}", config_dir);
+                log::info!("Generating self-signed certificate in {:?}", config_dir);
                 generate_self_signed(&cert_path, &key_path)?;
             }
 
