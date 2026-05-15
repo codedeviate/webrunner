@@ -14,13 +14,25 @@ use crate::cli::CliConfig;
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .fallback(any(handle_request))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::access_log::middleware,
+        ))
         .with_state(state)
 }
 
 pub async fn run(config: CliConfig, root: PathBuf) -> Result<(), String> {
+    let access_log = match config.log.as_deref() {
+        Some(target) => Some(Arc::new(
+            crate::access_log::AccessLog::open(target)?,
+        )),
+        None => None,
+    };
+
     let state = AppState {
         root: root.clone(),
         config: Arc::new(config.clone()),
+        access_log,
     };
     let app = build_router(state);
 
@@ -153,7 +165,7 @@ pub async fn bind_and_serve(
         tasks.push(tokio::spawn(async move {
             axum_server::from_tcp(listener)
                 .handle(handle)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
         }));
     }
@@ -165,7 +177,7 @@ pub async fn bind_and_serve(
         tasks.push(tokio::spawn(async move {
             axum_server::tls_rustls::from_tcp_rustls(listener, tls_config)
                 .handle(handle)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
         }));
     }
@@ -223,6 +235,7 @@ mod tests {
         let state = AppState {
             root,
             config: Arc::new(config),
+            access_log: None,
         };
         build_router(state)
     }

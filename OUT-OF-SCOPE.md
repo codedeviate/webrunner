@@ -53,10 +53,12 @@ entry rather than leaving a crossed-out line here.
 
 ### Operational
 
-- **Access logs** in Common or Combined Log Format, with a `--log` flag.
 - **File watching / hot reload** of `.htaccess` so edits don't require
   request-time re-parse cost (or, conversely, don't get cached past edit).
 - **Config file** (`webrunner.toml`) for repeated invocations.
+- **Authenticated user in access logs.** The `%u` field stays `-`
+  until the auth check threads the username out into the middleware
+  context via request extensions.
 
 ### Distribution
 
