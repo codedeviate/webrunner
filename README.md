@@ -24,7 +24,7 @@ Built for local development and quick prototyping. Not a production server.
   - `AuthType Basic` with `.htpasswd` (bcrypt, SHA-1, Apache MD5)
 - HTTPS with auto-generated self-signed certificates (cached in
   `~/.config/webrunner/`) or your own cert/key
-- Simultaneous HTTP + HTTPS listeners
+- Simultaneous HTTP + HTTPS listeners on IPv4 and IPv6 (default)
 - Graceful shutdown on `Ctrl+C` / `SIGTERM`
 
 ## Install
@@ -82,6 +82,8 @@ webrunner [OPTIONS]
       --cert <PATH>          Path to TLS certificate (PEM); requires --key
       --key  <PATH>          Path to TLS private key (PEM); requires --cert
       --no-index             Disable directory listing (return 403 for dirs)
+      --bind <ADDR[,ADDR...]> Bind addresses (IPv4/IPv6 literals).
+                             Default: 0.0.0.0,::
       --cgi <EXT[,EXT...]>   Extra extensions to execute as CGI (js, ts).
                              pl and php are CGI by default.
       --examples             Print rich usage examples and exit
@@ -115,6 +117,24 @@ exception your browser shows.
 ```sh
 webrunner --cert ./cert.pem --key ./key.pem
 ```
+
+### Restrict to loopback
+
+```sh
+webrunner --bind 127.0.0.1,::1
+```
+
+Use this on a shared dev box so only `localhost` clients can reach the
+server. Comma-separated IP literals; repeat the flag if you prefer.
+
+### Bind to a specific interface
+
+```sh
+webrunner --bind 192.168.1.10
+```
+
+Useful for serving the dev site to another device on the LAN (e.g. a
+phone for mobile testing).
 
 ### CGI script
 
