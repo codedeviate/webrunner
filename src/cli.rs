@@ -45,6 +45,10 @@ pub struct CliConfig {
     #[arg(long, value_delimiter = ',')]
     pub no_cgi: Vec<String>,
 
+    /// CGI script timeout, in seconds. Use 0 to disable. Default: 30.
+    #[arg(long, value_name = "SECS", default_value_t = 30)]
+    pub cgi_timeout: u64,
+
     /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
     /// repeatable. Default: 0.0.0.0,::
     #[arg(long, value_delimiter = ',')]
@@ -328,6 +332,30 @@ mod tests {
         assert!(err.contains("--cgi"));
         assert!(err.contains("--no-cgi"));
         assert!(err.contains("pl"));
+    }
+
+    #[test]
+    fn test_cgi_timeout_default_30() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert_eq!(cfg.cgi_timeout, 30);
+    }
+
+    #[test]
+    fn test_cgi_timeout_custom_value() {
+        let cfg = CliConfig::parse_from(["webrunner", "--cgi-timeout", "60"]);
+        assert_eq!(cfg.cgi_timeout, 60);
+    }
+
+    #[test]
+    fn test_cgi_timeout_zero_accepted() {
+        let cfg = CliConfig::parse_from(["webrunner", "--cgi-timeout", "0"]);
+        assert_eq!(cfg.cgi_timeout, 0);
+    }
+
+    #[test]
+    fn test_cgi_timeout_negative_rejected() {
+        let result = CliConfig::try_parse_from(["webrunner", "--cgi-timeout", "-5"]);
+        assert!(result.is_err());
     }
 
     #[test]
