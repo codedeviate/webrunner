@@ -34,6 +34,17 @@ pub struct CliConfig {
     #[arg(long, value_delimiter = ',')]
     pub cgi: Vec<String>,
 
+    /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
+    /// repeatable. Default: 0.0.0.0,::
+    #[arg(long, value_delimiter = ',')]
+    pub bind: Vec<String>,
+
+    /// True iff the user explicitly passed --bind. Drives fail-hard vs.
+    /// fail-soft semantics in server::run. Derived in validate(); not
+    /// parsed from CLI.
+    #[clap(skip)]
+    pub bind_explicit: bool,
+
     /// Print usage examples and exit
     #[arg(long)]
     pub examples: bool,
@@ -169,5 +180,24 @@ mod tests {
         let err = cfg.validate().unwrap_err();
         assert!(err.contains("--cgi"));
         assert!(err.contains("html"));
+    }
+
+    #[test]
+    fn test_bind_default_empty_before_validate() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert!(cfg.bind.is_empty());
+        assert!(!cfg.bind_explicit);
+    }
+
+    #[test]
+    fn test_bind_comma_list_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1,::1"]);
+        assert_eq!(cfg.bind, vec!["127.0.0.1".to_string(), "::1".to_string()]);
+    }
+
+    #[test]
+    fn test_bind_repeated_flag_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--bind", "127.0.0.1", "--bind", "::1"]);
+        assert_eq!(cfg.bind, vec!["127.0.0.1".to_string(), "::1".to_string()]);
     }
 }
