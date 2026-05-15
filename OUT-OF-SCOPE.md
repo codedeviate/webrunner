@@ -50,7 +50,6 @@ entry rather than leaving a crossed-out line here.
 ### CGI
 
 - **Per-directory script aliases** (`AddHandler`, `Action`).
-- **CGI timeouts** — currently scripts can hang indefinitely.
 
 ### Operational
 

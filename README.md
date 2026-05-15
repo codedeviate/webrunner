@@ -92,6 +92,8 @@ webrunner [OPTIONS]
       --no-cgi <EXT>         Disable always-on CGI for listed extensions
                              (pl, php). Repeatable / comma-separated.
                              Mutually exclusive with --cgi per extension.
+      --cgi-timeout <SECS>   CGI script timeout. 0 disables.
+                             Default: 30
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -170,6 +172,10 @@ Scripts receive standard CGI/1.1 environment variables (`REQUEST_METHOD`,
 `HTTP_*`, …). The POST body is delivered on stdin. Output is parsed as
 headers + blank line + body; use `Status: 404 Not Found` to set a non-200
 response.
+
+CGI scripts that don't return within `--cgi-timeout` seconds (default
+30) are killed and the client receives a 504. Pass `--cgi-timeout 0`
+to disable the limit while debugging a slow script interactively.
 
 ### Executing server-side JavaScript / TypeScript
 

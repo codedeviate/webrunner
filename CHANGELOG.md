@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - `--no-cgi <ext[,ext...]>` flag to disable always-on CGI execution
   for `pl` and/or `php`. Mirror of `--cgi`. Passing the same
   extension to both `--cgi` and `--no-cgi` is rejected at startup.
+- `--cgi-timeout <SECS>` flag to configure the CGI script timeout
+  (default 30 seconds; `0` disables). Previously fixed at 30
+  seconds.
 
 ### Changed
 
@@ -31,6 +34,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   can now reach the server out of the box. On systems where IPv6 is
   disabled at the kernel level, the IPv6 listener is skipped with a
   stderr warning and the server continues on IPv4.
+
+### Fixed
+
+- CGI children are now killed when the timeout fires. Previously
+  the script remained running after the 504 response was sent,
+  leaving an orphaned process until it finished on its own.
 
 ## [0.4.0] - 2026-05-15
 
