@@ -33,7 +33,6 @@ pub fn http_date(time: SystemTime) -> String {
         days[wday], day, months[month], year, hour, min, sec)
 }
 
-#[allow(dead_code)]
 const IMF_FIXDATE: &[time::format_description::FormatItem<'_>] = format_description!(
     "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT"
 );
@@ -41,7 +40,6 @@ const IMF_FIXDATE: &[time::format_description::FormatItem<'_>] = format_descript
 /// Parse an RFC 7231 IMF-fixdate string (`Sun, 06 Nov 1994 08:49:37 GMT`)
 /// into a `SystemTime`. Returns `None` for any unparseable input —
 /// callers should treat `None` as "header absent" per RFC 7232 §3.3.
-#[allow(dead_code)]
 pub fn parse_imf_fixdate(s: &str) -> Option<SystemTime> {
     let dt = PrimitiveDateTime::parse(s, IMF_FIXDATE).ok()?;
     let secs = dt.assume_utc().unix_timestamp();

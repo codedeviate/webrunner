@@ -16,7 +16,7 @@ use crate::htaccess::parse_htaccess_for_path;
 use crate::auth::{parse_htpasswd_file, check_credentials};
 use crate::rewrite::{apply_rewrites, RewriteResult};
 use crate::cgi::{is_cgi_ext, build_cgi_env, run_cgi};
-use crate::static_files::{resolve_index, build_etag, http_date, format_directory_listing, parse_range};
+use crate::static_files::{resolve_index, build_etag, http_date, format_directory_listing, parse_range, parse_imf_fixdate};
 use crate::mime::mime_for_ext_owned;
 
 #[derive(Clone)]
@@ -181,10 +181,18 @@ async fn serve_static_file(
     let etag = build_etag(file_size, modified_secs);
     let last_modified = http_date(modified);
 
-    // ETag / If-None-Match check
+    // ETag / If-None-Match check (takes precedence over If-Modified-Since)
     if let Some(inm) = req_headers.get(header::IF_NONE_MATCH) {
         if inm.to_str().unwrap_or("") == etag {
             return Response::builder().status(304).body(Body::empty()).unwrap();
+        }
+        // INM present but did not match — fall through to serve normally.
+        // Per RFC 7232 §6, do NOT consult If-Modified-Since when INM is present.
+    } else if let Some(ims) = req_headers.get(header::IF_MODIFIED_SINCE) {
+        if let Some(client_time) = parse_imf_fixdate(ims.to_str().unwrap_or("")) {
+            if modified <= client_time {
+                return Response::builder().status(304).body(Body::empty()).unwrap();
+            }
         }
     }
 
