@@ -89,6 +89,9 @@ webrunner [OPTIONS]
                              Default: 0.0.0.0,::
       --cgi <EXT[,EXT...]>   Extra extensions to execute as CGI (js, ts).
                              pl and php are CGI by default.
+      --no-cgi <EXT[,EXT...]> Disable always-on CGI for listed extensions
+                             (pl, php). Mutually exclusive with --cgi
+                             per extension.
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -180,6 +183,15 @@ webrunner --cgi js,ts
 
 The script's stdout is parsed as CGI output (headers, blank line, body),
 same as for `.pl` / `.php`. `bun` must be on `PATH`.
+
+### Serve `.pl` or `.php` files as static text
+
+```sh
+webrunner --no-cgi pl,php
+```
+
+Useful when serving a directory of Perl/PHP source for reading rather
+than execution. Mutually exclusive with `--cgi` for the same extension.
 
 ### Front-controller rewrite + basic auth
 

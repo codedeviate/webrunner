@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   choosing the document root. The path is canonicalised at startup
   and validated to be an existing directory. Default behaviour
   (current working directory) is unchanged.
+- `--no-cgi <ext[,ext...]>` flag to disable always-on CGI execution
+  for `pl` and/or `php`. Mirror of `--cgi`. Passing the same
+  extension to both `--cgi` and `--no-cgi` is rejected at startup.
 
 ### Changed
 
