@@ -82,7 +82,8 @@ webrunner [OPTIONS]
       --cert <PATH>          Path to TLS certificate (PEM); requires --key
       --key  <PATH>          Path to TLS private key (PEM); requires --cert
       --no-index             Disable directory listing (return 403 for dirs)
-      --bind <ADDR[,ADDR...]> Bind addresses (IPv4/IPv6 literals).
+      --bind <ADDR>          Bind addresses (IPv4/IPv6 literals).
+                             Repeatable / comma-separated.
                              Default: 0.0.0.0,::
       --cgi <EXT[,EXT...]>   Extra extensions to execute as CGI (js, ts).
                              pl and php are CGI by default.
