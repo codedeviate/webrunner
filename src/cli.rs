@@ -130,7 +130,6 @@ impl CliConfig {
     /// Picks `--root` if set, then the positional argument, then falls
     /// back to the current working directory. The result is
     /// canonicalised (symlinks followed) and verified to be a directory.
-    #[allow(dead_code)] // removed when wired in main.rs (Task 3)
     pub fn resolve_root(&self) -> Result<PathBuf, String> {
         let raw: Option<&str> = self.root.as_deref().or(self.root_pos.as_deref());
         let path = match raw {
