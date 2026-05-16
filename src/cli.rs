@@ -63,6 +63,21 @@ pub struct CliConfig {
     #[arg(long, value_enum, default_value_t = crate::compression::Compression::On)]
     pub compression: crate::compression::Compression,
 
+    /// Enable `Strict-Transport-Security` on HTTPS responses with this
+    /// max-age (in seconds). Default: header not sent.
+    #[arg(long, value_name = "SECS")]
+    pub hsts: Option<u64>,
+
+    /// Add the `includeSubDomains` directive to the HSTS header.
+    /// Requires --hsts.
+    #[arg(long)]
+    pub hsts_include_subdomains: bool,
+
+    /// Add the `preload` directive to the HSTS header.
+    /// Requires --hsts.
+    #[arg(long)]
+    pub hsts_preload: bool,
+
     /// Bind addresses (IPv4 or IPv6 literals). Comma-separated and/or
     /// repeatable. Default: 0.0.0.0,::
     #[arg(long, value_delimiter = ',')]
@@ -93,6 +108,20 @@ impl CliConfig {
     /// Returns true if HTTPS should be active (either --https flag or --cert+--key supplied)
     pub fn https_active(&self) -> bool {
         self.https || (self.cert.is_some() && self.key.is_some())
+    }
+
+    /// Returns the `Strict-Transport-Security` header value to emit on
+    /// HTTPS responses, or `None` when `--hsts` is not set.
+    pub fn hsts_header_value(&self) -> Option<String> {
+        let max_age = self.hsts?;
+        let mut s = format!("max-age={}", max_age);
+        if self.hsts_include_subdomains {
+            s.push_str("; includeSubDomains");
+        }
+        if self.hsts_preload {
+            s.push_str("; preload");
+        }
+        Some(s)
     }
 
     /// Validate CLI arguments. Normalises `cgi`, `no_cgi`, and `bind`
@@ -173,6 +202,12 @@ impl CliConfig {
             return Err(
                 "--root and the positional <DIR> argument are mutually exclusive"
                     .to_string(),
+            );
+        }
+
+        if (self.hsts_include_subdomains || self.hsts_preload) && self.hsts.is_none() {
+            return Err(
+                "--hsts-include-subdomains and --hsts-preload require --hsts".to_string(),
             );
         }
 
@@ -436,6 +471,61 @@ mod tests {
     fn test_compression_invalid_rejected() {
         let result = CliConfig::try_parse_from(["webrunner", "--compression", "maybe"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hsts_default_none() {
+        let cfg = CliConfig::parse_from(["webrunner"]);
+        assert_eq!(cfg.hsts, None);
+        assert_eq!(cfg.hsts_header_value(), None);
+    }
+
+    #[test]
+    fn test_hsts_max_age_parses() {
+        let cfg = CliConfig::parse_from(["webrunner", "--hsts", "60"]);
+        assert_eq!(cfg.hsts, Some(60));
+        assert_eq!(cfg.hsts_header_value().as_deref(), Some("max-age=60"));
+    }
+
+    #[test]
+    fn test_hsts_include_subdomains() {
+        let cfg = CliConfig::parse_from([
+            "webrunner",
+            "--hsts", "31536000",
+            "--hsts-include-subdomains",
+        ]);
+        assert_eq!(
+            cfg.hsts_header_value().as_deref(),
+            Some("max-age=31536000; includeSubDomains"),
+        );
+    }
+
+    #[test]
+    fn test_hsts_preload() {
+        let cfg = CliConfig::parse_from([
+            "webrunner",
+            "--hsts", "31536000",
+            "--hsts-include-subdomains",
+            "--hsts-preload",
+        ]);
+        assert_eq!(
+            cfg.hsts_header_value().as_deref(),
+            Some("max-age=31536000; includeSubDomains; preload"),
+        );
+    }
+
+    #[test]
+    fn test_hsts_subdomains_without_max_age_rejected() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--hsts-include-subdomains"]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("--hsts"));
+        assert!(err.contains("subdomains"));
+    }
+
+    #[test]
+    fn test_hsts_preload_without_max_age_rejected() {
+        let mut cfg = CliConfig::parse_from(["webrunner", "--hsts-preload"]);
+        assert!(cfg.validate().is_err());
     }
 
     #[test]
