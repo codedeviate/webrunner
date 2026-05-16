@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Content-Encoding for compressible static files (text/*,
   application/json, application/javascript, SVG, wasm). Responses
   under 256 bytes and Range responses are served uncompressed.
+- `--hsts <SECS>` flag (plus `--hsts-include-subdomains` and
+  `--hsts-preload` modifiers) to send `Strict-Transport-Security`
+  on HTTPS responses. Default: header not sent. HTTPS-only per
+  RFC 6797 §7.2.
 
 ### Changed
 
