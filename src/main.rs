@@ -5,6 +5,7 @@ mod cli;
 mod compression;
 mod handler;
 mod htaccess;
+mod hsts;
 mod logging;
 mod mime;
 mod rewrite;

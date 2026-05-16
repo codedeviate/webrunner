@@ -99,6 +99,12 @@ webrunner [OPTIONS]
                              Combined Log Format.
       --compression <ON|OFF> Enable brotli / gzip compression for
                              text-shaped static files. Default: on
+      --hsts <SECS>          Send Strict-Transport-Security on HTTPS
+                             with this max-age. Default: no header.
+      --hsts-include-subdomains
+                             Add includeSubDomains directive.
+                             Requires --hsts.
+      --hsts-preload         Add preload directive. Requires --hsts.
       --examples             Print rich usage examples and exit
   -h, --help                 Show help
   -V, --version              Show version
@@ -159,6 +165,25 @@ exception your browser shows.
 ```sh
 webrunner --cert ./cert.pem --key ./key.pem
 ```
+
+### HSTS (Strict-Transport-Security)
+
+Pass `--hsts <SECS>` to send `Strict-Transport-Security:
+max-age=<SECS>` on HTTPS responses. Use `--hsts-include-subdomains`
+and `--hsts-preload` for the corresponding directives:
+
+```sh
+webrunner --https --hsts 60                                # short experiment
+webrunner --https --hsts 31536000 --hsts-include-subdomains
+webrunner --https --hsts 31536000 --hsts-include-subdomains --hsts-preload
+```
+
+**Caution for localhost work:** browsers cache HSTS for the full
+`max-age` and apply it to all paths on that origin — testing HSTS
+against `https://localhost` can leave a browser refusing
+`http://localhost` (or other ports on that origin) until the cache
+expires. Start with a short `max-age` (e.g. `--hsts 60`) when
+experimenting.
 
 ### Restrict to loopback
 
