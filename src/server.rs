@@ -1,4 +1,5 @@
 use axum::{Router, routing::any};
+use axum::http::HeaderValue;
 use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::{IpAddr, SocketAddr};
@@ -98,7 +99,11 @@ pub async fn run(config: CliConfig, root: PathBuf) -> Result<(), String> {
     log::info!("bound: {}", bound_urls.join(", "));
     log::info!("Press Ctrl+C to stop.");
 
-    bind_and_serve(app, http_listeners, https_pairs, handle).await
+    let hsts_value: Option<HeaderValue> = config
+        .hsts_header_value()
+        .and_then(|s| HeaderValue::from_str(&s).ok());
+
+    bind_and_serve(app, http_listeners, https_pairs, hsts_value, handle).await
 }
 
 fn bind_listeners_for_port(
@@ -154,6 +159,7 @@ pub async fn bind_and_serve(
     app: Router,
     http_listeners: Vec<TcpListener>,
     https_listeners: Vec<(TcpListener, RustlsConfig)>,
+    hsts_value: Option<HeaderValue>,
     handle: Handle,
 ) -> Result<(), String> {
     let mut tasks: Vec<tokio::task::JoinHandle<Result<(), std::io::Error>>> = Vec::new();
@@ -172,12 +178,18 @@ pub async fn bind_and_serve(
 
     for (listener, tls_config) in https_listeners {
         listener.set_nonblocking(true).map_err(|e| format!("set_nonblocking: {}", e))?;
-        let app = app.clone();
+        let https_app = match &hsts_value {
+            Some(v) => app.clone().layer(axum::middleware::from_fn_with_state(
+                v.clone(),
+                crate::hsts::middleware,
+            )),
+            None => app.clone(),
+        };
         let handle = handle.clone();
         tasks.push(tokio::spawn(async move {
             axum_server::tls_rustls::from_tcp_rustls(listener, tls_config)
                 .handle(handle)
-                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                .serve(https_app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
         }));
     }
@@ -275,7 +287,7 @@ mod tests {
         let handle = Handle::new();
         let server_handle = handle.clone();
         let server = tokio::spawn(async move {
-            bind_and_serve(app, vec![v4_listener, v6_listener], vec![], server_handle).await
+            bind_and_serve(app, vec![v4_listener, v6_listener], vec![], None, server_handle).await
         });
 
         let v4_response = http_get_status(v4_addr).await;
