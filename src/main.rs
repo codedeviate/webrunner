@@ -4,6 +4,7 @@ mod cgi;
 mod cli;
 mod compression;
 mod handler;
+mod header_directive;
 mod htaccess;
 mod hsts;
 mod logging;
