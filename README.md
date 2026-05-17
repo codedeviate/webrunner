@@ -123,7 +123,8 @@ fatal startup errors.
 **Access logs.** Pass `--log <PATH>` to write one Combined Log Format
 line per request. `--log -` writes to stdout instead. Access logs are
 separate from `--log-level`: setting `--log-level off` does not
-silence them.
+silence them. The `%u` field is the authenticated username for
+requests that passed `AuthType Basic` auth, and `-` otherwise.
 
 **Compression.** webrunner serves text-shaped responses (`text/*`,
 `application/json`, `application/javascript`, SVG, wasm) compressed

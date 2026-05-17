@@ -53,6 +53,12 @@ impl AccessLog {
     }
 }
 
+/// Typed marker placed in response extensions by the request handler
+/// when a request passed webrunner-managed `.htpasswd` auth. The
+/// access-log middleware reads it to populate the `%u` field.
+#[derive(Clone, Debug)]
+pub struct AuthUser(pub String);
+
 /// Format a Combined Log Format line.
 ///
 /// Spec: `%h - %u [%t] "%r" %>s %b "%{Referer}i" "%{User-Agent}i"`.
@@ -123,6 +129,11 @@ pub async fn middleware(
 
     let response = next.run(req).await;
 
+    let auth_user = response
+        .extensions()
+        .get::<AuthUser>()
+        .map(|u| u.0.clone());
+
     let status = response.status().as_u16();
     let body_size = response
         .headers()
@@ -133,7 +144,7 @@ pub async fn middleware(
 
     let line = format_combined(
         peer.ip(),
-        None,
+        auth_user.as_deref(),
         &method,
         &uri,
         &version,
@@ -216,5 +227,17 @@ mod tests {
         assert!(line.starts_with("192.168.1.42 - alice ["));
         assert!(line.contains("\"POST /api/data?id=7 HTTP/1.1\" 201 1024"));
         assert!(line.ends_with("\"https://example.com/\" \"Mozilla/5.0\""));
+    }
+
+    #[test]
+    fn auth_user_round_trips_through_response_extensions() {
+        use axum::body::Body;
+        use axum::http::Response;
+
+        let mut response: Response<Body> = Response::new(Body::empty());
+        response.extensions_mut().insert(AuthUser("alice".to_string()));
+
+        let read = response.extensions().get::<AuthUser>().map(|u| u.0.as_str());
+        assert_eq!(read, Some("alice"));
     }
 }

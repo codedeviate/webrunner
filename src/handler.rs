@@ -68,12 +68,15 @@ pub async fn handle_request(
     };
 
     // Auth check
+    let mut authenticated_user: Option<String> = None; // consumed by Task 3 (response-extension stamp)
     if htaccess.auth_required {
         if let Some(user_file) = &htaccess.auth_user_file {
-            let authorized = check_basic_auth(&req_headers, user_file);
-            if !authorized {
-                let realm = htaccess.auth_name.as_deref().unwrap_or("Restricted");
-                return auth_challenge_response(realm);
+            match check_basic_auth(&req_headers, user_file) {
+                Some(user) => authenticated_user = Some(user),
+                None => {
+                    let realm = htaccess.auth_name.as_deref().unwrap_or("Restricted");
+                    return auth_challenge_response(realm);
+                }
             }
         } else {
             // auth_required but no AuthUserFile configured — deny access
@@ -81,28 +84,41 @@ pub async fn handle_request(
             return error_response(403, "Forbidden");
         }
     }
-
     // Redirect/Rewrite
-    match apply_rewrites(path_str, query, &htaccess) {
-        RewriteResult::Redirect { status, location } => {
-            return Response::builder()
-                .status(status)
-                .header(header::LOCATION, location)
-                .body(Body::empty())
-                .unwrap();
-        }
+    let mut response = match apply_rewrites(path_str, query, &htaccess) {
+        RewriteResult::Redirect { status, location } => Response::builder()
+            .status(status)
+            .header(header::LOCATION, location)
+            .body(Body::empty())
+            .unwrap(),
         RewriteResult::Rewrite(new_path) => {
             let new_rel = new_path.trim_start_matches('/');
-            let new_fs = match safe_join(&state.root, new_rel) {
-                Some(p) => p,
-                None => return error_response(400, "Bad Request"),
-            };
-            return serve_path(&state, &new_fs, &new_path, query, &method, &req_headers, &htaccess, body_bytes, peer_addr.ip()).await;
+            match safe_join(&state.root, new_rel) {
+                Some(new_fs) => {
+                    serve_path(
+                        &state, &new_fs, &new_path, query, &method, &req_headers,
+                        &htaccess, body_bytes, peer_addr.ip(),
+                    )
+                    .await
+                }
+                None => error_response(400, "Bad Request"),
+            }
         }
-        RewriteResult::None => {}
-    }
+        RewriteResult::None => {
+            serve_path(
+                &state, &fs_path, path_str, query, &method, &req_headers,
+                &htaccess, body_bytes, peer_addr.ip(),
+            )
+            .await
+        }
+    };
 
-    serve_path(&state, &fs_path, path_str, query, &method, &req_headers, &htaccess, body_bytes, peer_addr.ip()).await
+    if let Some(user) = authenticated_user {
+        response
+            .extensions_mut()
+            .insert(crate::access_log::AuthUser(user));
+    }
+    response
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -338,33 +354,25 @@ async fn run_cgi_handler(
     builder.body(Body::from(cgi_out.body)).unwrap()
 }
 
-fn check_basic_auth(headers: &HeaderMap, user_file: &str) -> bool {
-    let auth_header = match headers.get(header::AUTHORIZATION) {
-        Some(v) => v.to_str().unwrap_or(""),
-        None => return false,
-    };
-    let encoded = match auth_header.strip_prefix("Basic ") {
-        Some(e) => e,
-        None => return false,
-    };
+fn check_basic_auth(headers: &HeaderMap, user_file: &str) -> Option<String> {
+    let auth_header = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let encoded = auth_header.strip_prefix("Basic ")?;
     use base64::{Engine, engine::general_purpose::STANDARD};
-    let decoded = match STANDARD.decode(encoded) {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
+    let decoded = STANDARD.decode(encoded).ok()?;
     let credentials = String::from_utf8_lossy(&decoded);
-    let (username, password) = match credentials.split_once(':') {
-        Some(p) => p,
-        None => return false,
-    };
+    let (username, password) = credentials.split_once(':')?;
     let entries = match parse_htpasswd_file(user_file) {
         Ok(e) => e,
         Err(e) => {
             log::warn!("[auth] cannot read htpasswd file: {}", e);
-            return false;
+            return None;
         }
     };
-    check_credentials(username, password, &entries)
+    if check_credentials(username, password, &entries) {
+        Some(username.to_string())
+    } else {
+        None
+    }
 }
 
 fn auth_challenge_response(realm: &str) -> Response<Body> {
@@ -417,4 +425,63 @@ fn read_file_range(path: &Path, start: u64, length: u64) -> Vec<u8> {
     let n = file.read(&mut buf).unwrap_or(0);
     buf.truncate(n);
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    /// Build a `HeaderMap` containing a `Basic` Authorization header
+    /// for `<user>:<pass>`. Test helper.
+    fn basic_auth_headers(user: &str, pass: &str) -> HeaderMap {
+        let raw = format!("{}:{}", user, pass);
+        let encoded = STANDARD.encode(raw.as_bytes());
+        let value = format!("Basic {}", encoded);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&value).unwrap(),
+        );
+        headers
+    }
+
+    /// Write `<user>:{SHA}<sha1-of-pass>` to a tempfile and return the
+    /// path string. `{SHA}` (RFC 2307 sha1) is the fastest of the three
+    /// supported hash formats; bcrypt would slow the test suite.
+    fn write_htpasswd(dir: &std::path::Path, user: &str, sha1_hash: &str) -> String {
+        let path = dir.join(".htpasswd");
+        std::fs::write(&path, format!("{}:{}\n", user, sha1_hash)).unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn check_basic_auth_returns_username_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        // {SHA} hash of "secret"; reused from auth::tests::test_verify_sha1.
+        let user_file = write_htpasswd(
+            dir.path(),
+            "alice",
+            "{SHA}5en6G6MezRroT3XKqkdPOmY/BfQ=",
+        );
+        let headers = basic_auth_headers("alice", "secret");
+
+        let result = check_basic_auth(&headers, &user_file);
+        assert_eq!(result.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn check_basic_auth_returns_none_on_bad_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_file = write_htpasswd(
+            dir.path(),
+            "alice",
+            "{SHA}5en6G6MezRroT3XKqkdPOmY/BfQ=",
+        );
+        let headers = basic_auth_headers("alice", "wrong");
+
+        let result = check_basic_auth(&headers, &user_file);
+        assert!(result.is_none());
+    }
 }

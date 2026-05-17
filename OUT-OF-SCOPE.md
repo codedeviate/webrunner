@@ -43,15 +43,17 @@ entry rather than leaving a crossed-out line here.
 ### CGI
 
 - **Per-directory script aliases** (`AddHandler`, `Action`).
+- **`REMOTE_USER` in CGI environment.** When webrunner-managed
+  `AuthType Basic` precedes a CGI script, the script does not see
+  `REMOTE_USER=<name>` in its env. The username is already known
+  inside the handler (see access-log `%u`); plumbing it into
+  `build_cgi_env` is a small follow-up.
 
 ### Operational
 
 - **File watching / hot reload** of `.htaccess` so edits don't require
   request-time re-parse cost (or, conversely, don't get cached past edit).
 - **Config file** (`webrunner.toml`) for repeated invocations.
-- **Authenticated user in access logs.** The `%u` field stays `-`
-  until the auth check threads the username out into the middleware
-  context via request extensions.
 
 ### Distribution
 
