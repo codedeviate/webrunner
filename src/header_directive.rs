@@ -5,15 +5,12 @@
 //! `%U`), and applies them to response headers in
 //! `handle_request`.
 
-#[allow(unused_imports)] // wired in later tasks
 use axum::body::Body;
-#[allow(unused_imports)] // HeaderMap, HeaderValue, Response, Body wired in later tasks
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Response};
 use regex::Regex;
 use std::time::Instant;
 
 /// One `Header` rule from a `.htaccess` file.
-#[allow(dead_code)] // fields read in T3+
 #[derive(Debug, Clone)]
 pub struct HeaderRule {
     pub condition: HeaderCondition,
@@ -22,7 +19,6 @@ pub struct HeaderRule {
     pub source_loc: String,
 }
 
-#[allow(dead_code)] // variants matched in T4+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeaderCondition {
     /// Apply on every response.
@@ -31,7 +27,6 @@ pub enum HeaderCondition {
     OnSuccess,
 }
 
-#[allow(dead_code)] // variants matched in T4+
 #[derive(Debug, Clone)]
 pub enum HeaderAction {
     Set        { name: HeaderName, value: ValueTemplate },
@@ -51,7 +46,6 @@ pub enum HeaderAction {
 }
 
 /// Compiled `Header` value with placeholder slots resolved at apply time.
-#[allow(dead_code)] // fields read in T4+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ValueTemplate {
     pub parts: Vec<TemplatePart>,
@@ -77,7 +71,6 @@ pub enum TemplatePart {
 }
 
 /// Per-request context passed to `apply_rules`.
-#[allow(dead_code)] // constructed in T6
 pub struct RequestContext<'a> {
     pub method: &'a Method,
     pub url_path: &'a str,
@@ -209,7 +202,6 @@ fn flush_literal(literal: &mut String, parts: &mut Vec<TemplatePart>) {
 /// Apply-time errors (invalid `HeaderName`/`HeaderValue`, regex
 /// substitution producing invalid bytes) log a `warn!` with the rule's
 /// `source_loc` and skip the rule.
-#[allow(dead_code)] // wired into handle_request in T6
 pub fn apply_rules(
     response: &mut Response<Body>,
     rules: &[HeaderRule],
@@ -224,7 +216,6 @@ pub fn apply_rules(
     }
 }
 
-#[allow(dead_code)] // called via apply_rules, wired in T6
 fn condition_matches(c: HeaderCondition, status: u16) -> bool {
     match c {
         HeaderCondition::Always => true,
@@ -232,7 +223,6 @@ fn condition_matches(c: HeaderCondition, status: u16) -> bool {
     }
 }
 
-#[allow(dead_code)] // called via apply_rules, wired in T6
 fn apply_one(
     response: &mut Response<Body>,
     rule: &HeaderRule,
@@ -375,7 +365,6 @@ fn apply_one(
     }
 }
 
-#[allow(dead_code)] // called via apply_one, wired in T6
 fn resolve_template(
     template: &ValueTemplate,
     response: &Response<Body>,

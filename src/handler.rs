@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::time::{Instant, UNIX_EPOCH};
 
 use crate::cli::CliConfig;
 use crate::htaccess::parse_htaccess_for_path;
@@ -31,6 +31,11 @@ pub async fn handle_request(
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     req: Request<Body>,
 ) -> Response<Body> {
+    let request_start = Instant::now();
+    let request_unix_micros = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0);
     let (parts, body) = req.into_parts();
     let method = parts.method.to_string();
     let uri = parts.uri.clone();
@@ -112,6 +117,21 @@ pub async fn handle_request(
             .await
         }
     };
+
+    let protocol = format!("{:?}", parts.version);
+    let header_ctx = crate::header_directive::RequestContext {
+        method: &parts.method,
+        url_path: path_str,
+        protocol: &protocol,
+        start_time: request_start,
+        request_unix_micros,
+    };
+    crate::header_directive::apply_rules(
+        &mut response,
+        &htaccess.header_rules,
+        &req_headers,
+        &header_ctx,
+    );
 
     if let Some(user) = authenticated_user {
         response
