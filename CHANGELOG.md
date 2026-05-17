@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Changed
+
+- Access log `%u` field is now populated with the authenticated
+  username for requests that passed `AuthType Basic` auth.
+  Previously always `-`.
+
 ## [0.5.0] - 2026-05-17
 
 ### Added
