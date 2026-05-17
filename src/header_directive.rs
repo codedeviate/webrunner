@@ -14,7 +14,7 @@ use std::time::Instant;
 
 /// One `Header` rule from a `.htaccess` file.
 #[allow(dead_code)] // fields read in T3+
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeaderRule {
     pub condition: HeaderCondition,
     pub action: HeaderAction,
@@ -32,7 +32,7 @@ pub enum HeaderCondition {
 }
 
 #[allow(dead_code)] // variants matched in T4+
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HeaderAction {
     Set        { name: HeaderName, value: ValueTemplate },
     SetIfEmpty { name: HeaderName, value: ValueTemplate },
@@ -52,13 +52,13 @@ pub enum HeaderAction {
 
 /// Compiled `Header` value with placeholder slots resolved at apply time.
 #[allow(dead_code)] // fields read in T4+
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ValueTemplate {
     pub parts: Vec<TemplatePart>,
 }
 
 #[allow(dead_code)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemplatePart {
     Literal(String),
     /// `%t` — Unix timestamp in microseconds at request start.
@@ -216,7 +216,6 @@ fn flush_literal(literal: &mut String, parts: &mut Vec<TemplatePart>) {
 ///
 /// Returns `Err(reason)` on malformed input; the caller logs the warn
 /// with the source location.
-#[allow(dead_code)] // wired in T3 (htaccess integration)
 pub fn parse_header_line(rest: &str, source_loc: &str) -> Result<HeaderRule, String> {
     let mut tokens = tokenize_header_line(rest)?;
     if tokens.is_empty() {

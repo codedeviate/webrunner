@@ -16,6 +16,7 @@ pub struct HtaccessConfig {
     pub rewrite_engine: bool,
     pub rewrite_conds: Vec<RewriteCond>,
     pub rewrite_rules: Vec<RewriteRule>,
+    pub header_rules: Vec<crate::header_directive::HeaderRule>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +56,7 @@ impl Default for HtaccessConfig {
             rewrite_engine: false,
             rewrite_conds: Vec::new(),
             rewrite_rules: Vec::new(),
+            header_rules: Vec::new(),
         }
     }
 }
@@ -209,6 +211,24 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                     });
                 }
             }
+            "header" => {
+                // Skip the directive keyword itself; tokens[0] is "header" (any case).
+                // Re-slice from the original line so quoted values survive.
+                let after = line
+                    .trim_start()
+                    .get(tokens[0].len()..)
+                    .unwrap_or("")
+                    .trim_start();
+                let loc = format!("{}:{}", file_path, line_no + 1);
+                match crate::header_directive::parse_header_line(after, &loc) {
+                    Ok(rule) => cfg.header_rules.push(rule),
+                    Err(reason) => log::warn!(
+                        "[.htaccess] {}: malformed Header directive: {}",
+                        loc,
+                        reason
+                    ),
+                }
+            }
             _ => {
                 log::warn!("[.htaccess] {}:{}: unknown directive '{}', skipping", file_path, line_no + 1, tokens[0]);
             }
@@ -305,5 +325,13 @@ mod tests {
         write_htaccess(tmp.path(), "UnknownDirective foo bar\nDirectoryIndex index.html\n");
         let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
         assert_eq!(cfg.directory_index, vec!["index.html"]);
+    }
+
+    #[test]
+    fn test_header_directive_dispatched_to_module() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "Header set X-Foo bar\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.header_rules.len(), 1);
     }
 }
