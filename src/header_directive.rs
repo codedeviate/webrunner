@@ -57,7 +57,6 @@ pub struct ValueTemplate {
     pub parts: Vec<TemplatePart>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemplatePart {
     Literal(String),
@@ -78,7 +77,7 @@ pub enum TemplatePart {
 }
 
 /// Per-request context passed to `apply_rules`.
-#[allow(dead_code)]
+#[allow(dead_code)] // constructed in T6
 pub struct RequestContext<'a> {
     pub method: &'a Method,
     pub url_path: &'a str,
@@ -198,6 +197,183 @@ fn flush_literal(literal: &mut String, parts: &mut Vec<TemplatePart>) {
     if !literal.is_empty() {
         parts.push(TemplatePart::Literal(std::mem::take(literal)));
     }
+}
+
+/// Apply parsed `HeaderRule`s to the response.
+///
+/// Rules are applied in order. Each rule's condition is checked against
+/// the response status:
+/// - `Always`: always apply.
+/// - `OnSuccess`: apply only when `200 <= status < 300`.
+///
+/// Apply-time errors (invalid `HeaderName`/`HeaderValue`, regex
+/// substitution producing invalid bytes) log a `warn!` with the rule's
+/// `source_loc` and skip the rule.
+#[allow(dead_code)] // wired into handle_request in T6
+pub fn apply_rules(
+    response: &mut Response<Body>,
+    rules: &[HeaderRule],
+    request_headers: &HeaderMap,
+    ctx: &RequestContext<'_>,
+) {
+    for rule in rules {
+        if !condition_matches(rule.condition, response.status().as_u16()) {
+            continue;
+        }
+        apply_one(response, rule, request_headers, ctx);
+    }
+}
+
+#[allow(dead_code)] // called via apply_rules, wired in T6
+fn condition_matches(c: HeaderCondition, status: u16) -> bool {
+    match c {
+        HeaderCondition::Always => true,
+        HeaderCondition::OnSuccess => (200..300).contains(&status),
+    }
+}
+
+#[allow(dead_code)] // called via apply_rules, wired in T6
+fn apply_one(
+    response: &mut Response<Body>,
+    rule: &HeaderRule,
+    request_headers: &HeaderMap,
+    ctx: &RequestContext<'_>,
+) {
+    match &rule.action {
+        HeaderAction::Set { name, value } => {
+            let raw = resolve_template(value, response, ctx);
+            match HeaderValue::from_str(&raw) {
+                Ok(hv) => {
+                    response.headers_mut().insert(name.clone(), hv);
+                }
+                Err(e) => log::warn!(
+                    "[Header] {}: invalid value for {}: {}",
+                    rule.source_loc, name, e
+                ),
+            }
+        }
+        HeaderAction::SetIfEmpty { name, value } => {
+            if response.headers().get(name).is_some() {
+                return;
+            }
+            let raw = resolve_template(value, response, ctx);
+            match HeaderValue::from_str(&raw) {
+                Ok(hv) => {
+                    response.headers_mut().insert(name.clone(), hv);
+                }
+                Err(e) => log::warn!(
+                    "[Header] {}: invalid value for {}: {}",
+                    rule.source_loc, name, e
+                ),
+            }
+        }
+        HeaderAction::Add { name, value } => {
+            let raw = resolve_template(value, response, ctx);
+            match HeaderValue::from_str(&raw) {
+                Ok(hv) => {
+                    response.headers_mut().append(name.clone(), hv);
+                }
+                Err(e) => log::warn!(
+                    "[Header] {}: invalid value for {}: {}",
+                    rule.source_loc, name, e
+                ),
+            }
+        }
+        HeaderAction::Append { name, value } => {
+            let raw = resolve_template(value, response, ctx);
+            let combined = match response.headers().get(name) {
+                Some(existing) => {
+                    let existing_str = existing.to_str().unwrap_or("");
+                    format!("{}, {}", existing_str, raw)
+                }
+                None => raw,
+            };
+            match HeaderValue::from_str(&combined) {
+                Ok(hv) => {
+                    response.headers_mut().insert(name.clone(), hv);
+                }
+                Err(e) => log::warn!(
+                    "[Header] {}: invalid value for {}: {}",
+                    rule.source_loc, name, e
+                ),
+            }
+        }
+        HeaderAction::Merge { name, value } => {
+            let raw = resolve_template(value, response, ctx);
+            let already_present = response
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(|existing| {
+                    existing
+                        .split(',')
+                        .map(|part| part.trim())
+                        .any(|part| part == raw)
+                })
+                .unwrap_or(false);
+            if already_present {
+                return;
+            }
+            let combined = match response.headers().get(name) {
+                Some(existing) => format!("{}, {}", existing.to_str().unwrap_or(""), raw),
+                None => raw,
+            };
+            match HeaderValue::from_str(&combined) {
+                Ok(hv) => {
+                    response.headers_mut().insert(name.clone(), hv);
+                }
+                Err(e) => log::warn!(
+                    "[Header] {}: invalid value for {}: {}",
+                    rule.source_loc, name, e
+                ),
+            }
+        }
+        HeaderAction::Unset { name } => {
+            // `HeaderMap::remove` returns the FIRST value and drops the rest.
+            // To remove ALL values we loop until none remain.
+            while response.headers_mut().remove(name).is_some() {}
+        }
+        // Echo + Edit/Edit* land in Task 5.
+        HeaderAction::Echo { .. } | HeaderAction::Edit { .. } => {
+            let _ = request_headers; // suppress unused-var until Task 5
+            log::warn!(
+                "[Header] {}: echo/edit not yet implemented (Task 5)",
+                rule.source_loc
+            );
+        }
+    }
+}
+
+#[allow(dead_code)] // called via apply_one, wired in T6
+fn resolve_template(
+    template: &ValueTemplate,
+    response: &Response<Body>,
+    ctx: &RequestContext<'_>,
+) -> String {
+    let mut out = String::new();
+    for part in &template.parts {
+        match part {
+            TemplatePart::Literal(s) => out.push_str(s),
+            TemplatePart::RequestTime => out.push_str(&ctx.request_unix_micros.to_string()),
+            TemplatePart::Duration => {
+                let micros = ctx.start_time.elapsed().as_micros();
+                out.push_str(&(micros as u64).to_string());
+            }
+            TemplatePart::BodySize => {
+                let size = response
+                    .headers()
+                    .get(axum::http::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("0");
+                out.push_str(size);
+            }
+            TemplatePart::Status => out.push_str(&response.status().as_u16().to_string()),
+            TemplatePart::Protocol => out.push_str(ctx.protocol),
+            TemplatePart::Method => out.push_str(ctx.method.as_str()),
+            TemplatePart::Url => out.push_str(ctx.url_path),
+        }
+    }
+    out
 }
 
 /// Parse the portion of a `.htaccess` line that follows the `Header`
@@ -504,5 +680,234 @@ mod tests {
     fn parse_malformed_missing_action() {
         let err = parse_header_line("set", "test:1").unwrap_err();
         assert!(err.to_lowercase().contains("missing"));
+    }
+
+    use axum::body::Body;
+    use axum::http::{Method, Response, StatusCode};
+    use std::time::Instant;
+
+    fn empty_request_ctx() -> (Method, String, String, Instant, u64) {
+        (
+            Method::GET,
+            "/test".to_string(),
+            "HTTP/1.1".to_string(),
+            Instant::now(),
+            1_700_000_000_000_000u64,
+        )
+    }
+
+    fn make_ctx<'a>(m: &'a Method, u: &'a str, p: &'a str, start: Instant, utc: u64) -> RequestContext<'a> {
+        RequestContext { method: m, url_path: u, protocol: p, start_time: start, request_unix_micros: utc }
+    }
+
+    fn rule(action: HeaderAction, condition: HeaderCondition) -> HeaderRule {
+        HeaderRule { condition, action, source_loc: "test:1".to_string() }
+    }
+
+    fn make_response(status: StatusCode) -> Response<Body> {
+        Response::builder().status(status).body(Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn apply_set_overrides_existing() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().insert("x-foo", HeaderValue::from_static("old"));
+        let action = HeaderAction::Set {
+            name: HeaderName::from_static("x-foo"),
+            value: compile_value_template("new"),
+        };
+        let rules = vec![rule(action, HeaderCondition::OnSuccess)];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert_eq!(resp.headers().get("x-foo").unwrap(), "new");
+    }
+
+    #[test]
+    fn apply_set_if_empty_skips_when_present() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().insert("x-foo", HeaderValue::from_static("kept"));
+        let rules = vec![rule(
+            HeaderAction::SetIfEmpty {
+                name: HeaderName::from_static("x-foo"),
+                value: compile_value_template("new"),
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert_eq!(resp.headers().get("x-foo").unwrap(), "kept");
+    }
+
+    #[test]
+    fn apply_add_appends_multi_value() {
+        let mut resp = make_response(StatusCode::OK);
+        let rules = vec![
+            rule(
+                HeaderAction::Add {
+                    name: HeaderName::from_static("set-cookie"),
+                    value: compile_value_template("a=1"),
+                },
+                HeaderCondition::OnSuccess,
+            ),
+            rule(
+                HeaderAction::Add {
+                    name: HeaderName::from_static("set-cookie"),
+                    value: compile_value_template("b=2"),
+                },
+                HeaderCondition::OnSuccess,
+            ),
+        ];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        let values: Vec<&str> = resp.headers().get_all("set-cookie").iter().map(|v| v.to_str().unwrap()).collect();
+        assert_eq!(values, vec!["a=1", "b=2"]);
+    }
+
+    #[test]
+    fn apply_append_concatenates_with_comma() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().insert("x-foo", HeaderValue::from_static("first"));
+        let rules = vec![rule(
+            HeaderAction::Append {
+                name: HeaderName::from_static("x-foo"),
+                value: compile_value_template("second"),
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert_eq!(resp.headers().get("x-foo").unwrap(), "first, second");
+    }
+
+    #[test]
+    fn apply_merge_skips_duplicate() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().insert("x-foo", HeaderValue::from_static("a, b"));
+        let rules = vec![rule(
+            HeaderAction::Merge {
+                name: HeaderName::from_static("x-foo"),
+                value: compile_value_template("b"),
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        // 'b' already present; merge is a no-op.
+        assert_eq!(resp.headers().get("x-foo").unwrap(), "a, b");
+    }
+
+    #[test]
+    fn apply_unset_removes_all_values() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().append("set-cookie", HeaderValue::from_static("a=1"));
+        resp.headers_mut().append("set-cookie", HeaderValue::from_static("b=2"));
+        let rules = vec![rule(
+            HeaderAction::Unset { name: HeaderName::from_static("set-cookie") },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert!(resp.headers().get_all("set-cookie").iter().next().is_none());
+    }
+
+    #[test]
+    fn apply_onsuccess_skips_on_404_and_always_applies_on_404() {
+        // OnSuccess rule on a 404: skipped.
+        let mut resp = make_response(StatusCode::NOT_FOUND);
+        let rules = vec![rule(
+            HeaderAction::Set {
+                name: HeaderName::from_static("x-onsuccess"),
+                value: compile_value_template("v"),
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert!(resp.headers().get("x-onsuccess").is_none());
+
+        // Always rule on a 404: applied.
+        let mut resp2 = make_response(StatusCode::NOT_FOUND);
+        let rules2 = vec![rule(
+            HeaderAction::Set {
+                name: HeaderName::from_static("x-always"),
+                value: compile_value_template("v"),
+            },
+            HeaderCondition::Always,
+        )];
+        apply_rules(&mut resp2, &rules2, &req, &ctx);
+        assert_eq!(resp2.headers().get("x-always").unwrap(), "v");
+    }
+
+    #[test]
+    fn resolve_method_and_url_and_protocol() {
+        let mut resp = make_response(StatusCode::OK);
+        let rules = vec![rule(
+            HeaderAction::Set {
+                name: HeaderName::from_static("x-info"),
+                value: compile_value_template("%m %U %H"),
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let m = Method::POST;
+        let u = "/api/x";
+        let p = "HTTP/1.1";
+        let ctx = make_ctx(&m, u, p, Instant::now(), 0);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert_eq!(resp.headers().get("x-info").unwrap(), "POST /api/x HTTP/1.1");
+    }
+
+    #[test]
+    fn resolve_status_from_response() {
+        let mut resp = make_response(StatusCode::CREATED);
+        let rules = vec![rule(
+            HeaderAction::Set {
+                name: HeaderName::from_static("x-status"),
+                value: compile_value_template("%s"),
+            },
+            HeaderCondition::Always,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert_eq!(resp.headers().get("x-status").unwrap(), "201");
+    }
+
+    #[test]
+    fn resolve_duration_is_decimal_microseconds() {
+        let start = Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let mut resp = make_response(StatusCode::OK);
+        let rules = vec![rule(
+            HeaderAction::Set {
+                name: HeaderName::from_static("x-d"),
+                value: compile_value_template("%D"),
+            },
+            HeaderCondition::Always,
+        )];
+        let req = HeaderMap::new();
+        let m = Method::GET;
+        let u = "/";
+        let p = "HTTP/1.1";
+        let ctx = make_ctx(&m, u, p, start, 0);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        let raw = resp.headers().get("x-d").unwrap().to_str().unwrap();
+        let micros: u64 = raw.parse().expect("not a number");
+        assert!(micros >= 10_000, "duration {} < 10ms", micros);
     }
 }
