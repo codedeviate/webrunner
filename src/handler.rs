@@ -84,29 +84,41 @@ pub async fn handle_request(
             return error_response(403, "Forbidden");
         }
     }
-    let _ = &authenticated_user; // placeholder — Task 3 will stamp this into response extensions
-
     // Redirect/Rewrite
-    match apply_rewrites(path_str, query, &htaccess) {
-        RewriteResult::Redirect { status, location } => {
-            return Response::builder()
-                .status(status)
-                .header(header::LOCATION, location)
-                .body(Body::empty())
-                .unwrap();
-        }
+    let mut response = match apply_rewrites(path_str, query, &htaccess) {
+        RewriteResult::Redirect { status, location } => Response::builder()
+            .status(status)
+            .header(header::LOCATION, location)
+            .body(Body::empty())
+            .unwrap(),
         RewriteResult::Rewrite(new_path) => {
             let new_rel = new_path.trim_start_matches('/');
-            let new_fs = match safe_join(&state.root, new_rel) {
-                Some(p) => p,
-                None => return error_response(400, "Bad Request"),
-            };
-            return serve_path(&state, &new_fs, &new_path, query, &method, &req_headers, &htaccess, body_bytes, peer_addr.ip()).await;
+            match safe_join(&state.root, new_rel) {
+                Some(new_fs) => {
+                    serve_path(
+                        &state, &new_fs, &new_path, query, &method, &req_headers,
+                        &htaccess, body_bytes, peer_addr.ip(),
+                    )
+                    .await
+                }
+                None => error_response(400, "Bad Request"),
+            }
         }
-        RewriteResult::None => {}
-    }
+        RewriteResult::None => {
+            serve_path(
+                &state, &fs_path, path_str, query, &method, &req_headers,
+                &htaccess, body_bytes, peer_addr.ip(),
+            )
+            .await
+        }
+    };
 
-    serve_path(&state, &fs_path, path_str, query, &method, &req_headers, &htaccess, body_bytes, peer_addr.ip()).await
+    if let Some(user) = authenticated_user {
+        response
+            .extensions_mut()
+            .insert(crate::access_log::AuthUser(user));
+    }
+    response
 }
 
 #[allow(clippy::too_many_arguments)]
