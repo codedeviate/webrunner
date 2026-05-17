@@ -31,7 +31,6 @@ entry rather than leaving a crossed-out line here.
 
 ### `.htaccess` directives
 
-- `Header set/add/unset` (mod_headers).
 - `ExpiresActive` / `ExpiresByType` / `ExpiresDefault` (mod_expires).
 - `Allow` / `Deny` / `Require ip` for IP-based access control.
 - `Require user <name>` and `Require group` (currently only `valid-user`).
@@ -71,6 +70,21 @@ entry rather than leaving a crossed-out line here.
 - **Resource limits** on CGI children (CPU, memory, output size). Platform-
   specific (`setrlimit`, job objects) and only matters once people start
   pointing webrunner at untrusted scripts.
+- **`mod_headers` placeholders for request/response headers**
+  (`%{NAME}i`, `%{NAME}o`). Small extension to the placeholder
+  resolver in `header_directive.rs`. Subproject #3 of the
+  full-mod_headers roadmap.
+- **`SetEnv` / `SetEnvIf` directives + env-var placeholders
+  (`%{NAME}e`) + `env=VAR` Header condition.** Requires a
+  per-request env-var bag. Subproject #4.
+- **`expr=` conditions on Header rules.** Apache `ap_expr` subset.
+  Requires an expression evaluator. Subproject #5.
+- **SSL placeholders (`%{NAME}s`).** Surface rustls connection
+  info (cipher, protocol version, peer cert) to Header values.
+  Subproject #6.
+- **Regex named-capture placeholders (`%{NAME}r`).** Refers to
+  named captures from rewrite rules. Requires rewrite engine
+  refactor. Subproject #6.
 
 ## Not yet supported
 
