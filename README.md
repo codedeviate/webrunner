@@ -22,6 +22,9 @@ Built for local development and quick prototyping. Not a production server.
   - `Redirect` (301/302)
   - `RewriteEngine`, `RewriteRule`, `RewriteCond` (incl. `[QSA]`, `[L]`, `[R]`)
   - `AuthType Basic` with `.htpasswd` (bcrypt, SHA-1, Apache MD5)
+  - `Header set/add/unset/append/merge/setifempty/echo/edit/edit*`
+    with `always|onsuccess` condition and basic placeholders
+    (`%t`, `%D`, `%l`, `%s`, `%H`, `%m`, `%U`)
 - HTTPS with auto-generated self-signed certificates (cached in
   `~/.config/webrunner/`) or your own cert/key
 - Simultaneous HTTP + HTTPS listeners on IPv4 and IPv6 (default)
@@ -276,6 +279,40 @@ htpasswd -B .htpasswd alice
 
 Supported hash formats: bcrypt (`$2y$…`), SHA-1 (`{SHA}…`), Apache MD5
 (`$apr1$…`).
+
+### Custom response headers
+
+Use the `Header` directive in `.htaccess` to set, add, remove, or
+rewrite response headers per directory:
+
+```apache
+# Security headers, applied to every response (including errors).
+Header always set X-Frame-Options "DENY"
+Header always set Referrer-Policy "no-referrer"
+
+# CORS preflight responses.
+Header set Access-Control-Allow-Origin "*"
+Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+
+# Strip a leaky header.
+Header unset X-Powered-By
+
+# Echo selected request headers back (matched as regex on names).
+Header echo "X-Forwarded-.*"
+
+# Add a timing header for browser DevTools.
+Header always set X-Request-Duration "%D us"
+```
+
+Supported actions: `set`, `setifempty`, `add`, `append`, `merge`,
+`unset`, `echo`, `edit`, `edit*`. The optional `always|onsuccess`
+modifier defaults to `onsuccess` (only applied to 2xx responses).
+Placeholders in values: `%t` (Unix microseconds), `%D` (request
+duration), `%l` (body size), `%s` (status), `%H` (protocol), `%m`
+(method), `%U` (URL path), `%%` (literal `%`).
+
+Note: when `--hsts` is set, the HSTS layer overwrites any
+`Header set Strict-Transport-Security` for HTTPS responses.
 
 ## How `.htaccess` is resolved
 

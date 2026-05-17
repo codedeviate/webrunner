@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- `Header` `.htaccess` directive (mod_headers subset) with all
+  nine actions: `set`, `setifempty`, `add`, `append`, `merge`,
+  `unset`, `echo`, `edit`, `edit*`. Supports the
+  `always|onsuccess` condition modifier and seven basic
+  placeholders: `%t`, `%D`, `%l`, `%s`, `%H`, `%m`, `%U`. Header
+  placeholders (`%{NAME}i`, `%{NAME}o`), env-var placeholders
+  (`%{NAME}e`), expression conditions (`expr=`), and SSL/regex
+  captures are tracked as follow-up subprojects in OUT-OF-SCOPE.
+
 ### Changed
 
 - Access log `%u` field is now populated with the authenticated
