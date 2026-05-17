@@ -335,24 +335,7 @@ fn apply_one(
         }
         HeaderAction::Echo { name_regex } => {
             for (name, value) in request_headers.iter() {
-                // Header names in axum's HeaderMap are always lowercase.
-                // Apache echo regex matching is case-insensitive, so
-                // compare the name in its canonical mixed-case form by
-                // title-casing for display — but since we don't have that
-                // here, we convert the stored name to titlecase for matching.
-                let name_for_match = name
-                    .as_str()
-                    .split('-')
-                    .map(|seg| {
-                        let mut c = seg.chars();
-                        match c.next() {
-                            None => String::new(),
-                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("-");
-                if name_regex.is_match(&name_for_match) {
+                if name_regex.is_match(name.as_str()) {
                     response.headers_mut().append(name.clone(), value.clone());
                 }
             }
@@ -491,8 +474,9 @@ pub fn parse_header_line(rest: &str, source_loc: &str) -> Result<HeaderRule, Str
         }
         "echo" => {
             let pat_tok = tokens.first().ok_or_else(|| "echo: missing header-name regex".to_string())?;
-            // Apache anchors echo regexes whole-string.
-            let anchored = format!("^(?:{})$", pat_tok);
+            // Apache anchors echo regexes whole-string. Header names are
+            // case-insensitive per RFC 9110 §5.1, so wrap as `(?i:...)`.
+            let anchored = format!("^(?i:{})$", pat_tok);
             let regex = Regex::new(&anchored)
                 .map_err(|e| format!("echo: invalid regex '{}': {}", pat_tok, e))?;
             if tokens.len() > 1 {
@@ -715,10 +699,12 @@ mod tests {
         let r = parse_header_line(r#"echo "X-Forwarded-.*""#, "test:1").unwrap();
         match r.action {
             HeaderAction::Echo { name_regex } => {
-                // Apache anchors echo regexes; we wrap input as ^(?:...)$.
-                assert!(name_regex.is_match("X-Forwarded-For"));
-                assert!(name_regex.is_match("X-Forwarded-Proto"));
-                assert!(!name_regex.is_match("Y-Forwarded-For"));
+                // Apache anchors echo regexes; we wrap input as ^(?i:...)$ so
+                // matching against lowercase axum header names is correct.
+                assert!(name_regex.is_match("x-forwarded-for"));
+                assert!(name_regex.is_match("x-forwarded-proto"));
+                assert!(name_regex.is_match("X-Forwarded-For")); // also matches mixed-case
+                assert!(!name_regex.is_match("y-forwarded-for"));
             }
             _ => panic!("expected Echo action"),
         }
@@ -946,7 +932,7 @@ mod tests {
 
         let rules = vec![rule(
             HeaderAction::Echo {
-                name_regex: Regex::new("^(?:X-Forwarded-.*)$").unwrap(),
+                name_regex: Regex::new("^(?i:X-Forwarded-.*)$").unwrap(),
             },
             HeaderCondition::OnSuccess,
         )];
@@ -1006,6 +992,31 @@ mod tests {
 
         let values: Vec<&str> = resp.headers().get_all("x-foo").iter().map(|v| v.to_str().unwrap()).collect();
         assert_eq!(values, vec!["Ab", "Ac"]);
+    }
+
+    #[test]
+    fn apply_echo_matches_allcaps_abbreviation_in_header_name() {
+        // Regression: previous title-casing implementation produced
+        // `X-Xss-Protection` from the lowercase axum name, which fails
+        // to match a user regex `X-XSS-Protection`. The case-insensitive
+        // regex wrap (`(?i:...)`) fixes this.
+        let mut resp = make_response(StatusCode::OK);
+        let mut req = HeaderMap::new();
+        req.insert("x-xss-protection", HeaderValue::from_static("1; mode=block"));
+
+        // Parse via parse_header_line so the same (?i:...) wrapping the
+        // production code path uses is exercised.
+        let r = parse_header_line(r#"echo "X-XSS-Protection""#, "test:1").unwrap();
+        let rules = vec![r];
+
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+
+        assert_eq!(
+            resp.headers().get("x-xss-protection").unwrap(),
+            "1; mode=block"
+        );
     }
 
     #[test]
