@@ -333,13 +333,61 @@ fn apply_one(
             // To remove ALL values we loop until none remain.
             while response.headers_mut().remove(name).is_some() {}
         }
-        // Echo + Edit/Edit* land in Task 5.
-        HeaderAction::Echo { .. } | HeaderAction::Edit { .. } => {
-            let _ = request_headers; // suppress unused-var until Task 5
-            log::warn!(
-                "[Header] {}: echo/edit not yet implemented (Task 5)",
-                rule.source_loc
-            );
+        HeaderAction::Echo { name_regex } => {
+            for (name, value) in request_headers.iter() {
+                // Header names in axum's HeaderMap are always lowercase.
+                // Apache echo regex matching is case-insensitive, so
+                // compare the name in its canonical mixed-case form by
+                // title-casing for display — but since we don't have that
+                // here, we convert the stored name to titlecase for matching.
+                let name_for_match = name
+                    .as_str()
+                    .split('-')
+                    .map(|seg| {
+                        let mut c = seg.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("-");
+                if name_regex.is_match(&name_for_match) {
+                    response.headers_mut().append(name.clone(), value.clone());
+                }
+            }
+        }
+        HeaderAction::Edit { name, value_regex, replacement, all } => {
+            // Collect existing values (cloned), then remove them all,
+            // then re-append after substitution. Apache's `edit` (no
+            // star) substitutes only the LAST value; `edit*` substitutes
+            // all values.
+            let existing: Vec<HeaderValue> = response
+                .headers()
+                .get_all(name)
+                .iter()
+                .cloned()
+                .collect();
+            // Drain all existing values.
+            while response.headers_mut().remove(name).is_some() {}
+            let last_idx = existing.len().saturating_sub(1);
+            for (idx, hv) in existing.into_iter().enumerate() {
+                let s = hv.to_str().unwrap_or("").to_string();
+                let new_s = if *all || idx == last_idx {
+                    value_regex.replace_all(&s, replacement.as_str()).to_string()
+                } else {
+                    s
+                };
+                match HeaderValue::from_str(&new_s) {
+                    Ok(new_hv) => {
+                        response.headers_mut().append(name.clone(), new_hv);
+                    }
+                    Err(e) => log::warn!(
+                        "[Header] {}: edit produced invalid value for {}: {}",
+                        rule.source_loc, name, e
+                    ),
+                }
+            }
         }
     }
 }
@@ -886,6 +934,78 @@ mod tests {
         let ctx = make_ctx(&m, &u, &p, s, utc);
         apply_rules(&mut resp, &rules, &req, &ctx);
         assert_eq!(resp.headers().get("x-status").unwrap(), "201");
+    }
+
+    #[test]
+    fn apply_echo_copies_matching_request_headers() {
+        let mut resp = make_response(StatusCode::OK);
+        let mut req = HeaderMap::new();
+        req.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        req.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        req.insert("y-other", HeaderValue::from_static("nope"));
+
+        let rules = vec![rule(
+            HeaderAction::Echo {
+                name_regex: Regex::new("^(?:X-Forwarded-.*)$").unwrap(),
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+
+        assert_eq!(resp.headers().get("x-forwarded-for").unwrap(), "1.2.3.4");
+        assert_eq!(resp.headers().get("x-forwarded-proto").unwrap(), "https");
+        assert!(resp.headers().get("y-other").is_none());
+    }
+
+    #[test]
+    fn apply_edit_replaces_last_value() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().append("x-foo", HeaderValue::from_static("alpha"));
+        resp.headers_mut().append("x-foo", HeaderValue::from_static("beta"));
+
+        let rules = vec![rule(
+            HeaderAction::Edit {
+                name: HeaderName::from_static("x-foo"),
+                value_regex: Regex::new("be").unwrap(),
+                replacement: "BE".to_string(),
+                all: false,
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+
+        let values: Vec<&str> = resp.headers().get_all("x-foo").iter().map(|v| v.to_str().unwrap()).collect();
+        // First value untouched; second value substituted.
+        assert_eq!(values, vec!["alpha", "BEta"]);
+    }
+
+    #[test]
+    fn apply_edit_star_replaces_all_values() {
+        let mut resp = make_response(StatusCode::OK);
+        resp.headers_mut().append("x-foo", HeaderValue::from_static("ab"));
+        resp.headers_mut().append("x-foo", HeaderValue::from_static("ac"));
+
+        let rules = vec![rule(
+            HeaderAction::Edit {
+                name: HeaderName::from_static("x-foo"),
+                value_regex: Regex::new("a").unwrap(),
+                replacement: "A".to_string(),
+                all: true,
+            },
+            HeaderCondition::OnSuccess,
+        )];
+        let req = HeaderMap::new();
+        let (m, u, p, s, utc) = empty_request_ctx();
+        let ctx = make_ctx(&m, &u, &p, s, utc);
+        apply_rules(&mut resp, &rules, &req, &ctx);
+
+        let values: Vec<&str> = resp.headers().get_all("x-foo").iter().map(|v| v.to_str().unwrap()).collect();
+        assert_eq!(values, vec!["Ab", "Ac"]);
     }
 
     #[test]
