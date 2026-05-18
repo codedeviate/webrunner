@@ -111,14 +111,17 @@ uploading — run it after touching `Cargo.toml` metadata fields.
 
 1. All work for the release is on `master` and `cargo test` passes.
 2. Bump `version` in `Cargo.toml`.
-3. Convert `[Unreleased]` in `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD`; add a
+3. Bump the `Latest release` badge version in `README.md` to match
+   `Cargo.toml` (the badge is hardcoded — same convention as
+   `codedeviate/loganalyzer`).
+4. Convert `[Unreleased]` in `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD`; add a
    fresh empty `[Unreleased]`.
-4. Move any newly-shipped items out of `OUT-OF-SCOPE.md` into the changelog
+5. Move any newly-shipped items out of `OUT-OF-SCOPE.md` into the changelog
    entry.
-5. Single commit: `chore(release): vX.Y.Z`.
-6. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-7. `gh release create vX.Y.Z --generate-notes`.
-8. `cargo publish` (when ready for crates.io).
-9. Update the Homebrew formula in the
+6. Single commit: `chore(release): vX.Y.Z`.
+7. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+8. `gh release create vX.Y.Z --generate-notes`.
+9. `cargo publish` (when ready for crates.io).
+10. Update the Homebrew formula in the
    [`codedeviate/homebrew-cli`](https://github.com/codedeviate/homebrew-cli)
    tap (bump `url`, `sha256`, and `version` to match the new tag).

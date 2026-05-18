@@ -1,5 +1,12 @@
 # webrunner
 
+[![GitHub](https://img.shields.io/badge/github-codedeviate%2Fwebrunner-181717?logo=github)](https://github.com/codedeviate/webrunner)
+[![Latest release](https://img.shields.io/badge/release-v0.7.0-blue)](https://github.com/codedeviate/webrunner/releases)
+[![crates.io](https://img.shields.io/crates/v/webrunner?logo=rust&color=orange)](https://crates.io/crates/webrunner)
+[![Homebrew](https://img.shields.io/badge/homebrew-codedeviate%2Fcli-FBB040?logo=homebrew)](https://github.com/codedeviate/homebrew-cli)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Rust edition 2021](https://img.shields.io/badge/rust-2021_edition_(MSRV_1.75)-dea584?logo=rust)](https://www.rust-lang.org)
+
 A zero-config development web server in Rust, with CGI and `.htaccess` support.
 
 Point it at a directory and you get static files, directory listings, classic CGI
