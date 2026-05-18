@@ -18,6 +18,9 @@ pub struct HtaccessConfig {
     pub redirect_matches: Vec<RedirectMatchRule>,
     pub rewrite_engine: bool,
     pub rewrite_rules: Vec<RewriteRule>,
+    pub rewrite_base: Option<String>,
+    pub access_control: crate::access_control::AccessControl,
+    pub auth_required_users: Option<Vec<String>>,
     pub header_rules: Vec<crate::header_directive::HeaderRule>,
     pub expires: crate::expires::ExpiresConfig,
 }
@@ -70,6 +73,7 @@ pub struct AuthScope {
     pub auth_required: bool,
     pub auth_name: Option<String>,
     pub auth_user_file: Option<String>,
+    pub auth_required_users: Option<Vec<String>>,
 }
 
 impl Default for HtaccessConfig {
@@ -88,6 +92,9 @@ impl Default for HtaccessConfig {
             redirect_matches: Vec::new(),
             rewrite_engine: false,
             rewrite_rules: Vec::new(),
+            rewrite_base: None,
+            access_control: crate::access_control::AccessControl::default(),
+            auth_required_users: None,
             header_rules: Vec::new(),
             expires: crate::expires::ExpiresConfig::default(),
         }
@@ -288,6 +295,7 @@ fn ensure_auth_scope<'a>(
                 auth_required: false,
                 auth_name: None,
                 auth_user_file: None,
+                auth_required_users: None,
             });
             scopes.last_mut().unwrap()
         }
@@ -355,11 +363,77 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 }
             }
             "require" => {
-                if tokens.get(1).map(|s| s.to_ascii_lowercase()) == Some("valid-user".to_string()) {
-                    if scope_stack.is_empty() {
-                        cfg.auth_required = true;
-                    } else {
-                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_required = true;
+                let kind = tokens.get(1).map(|s| s.to_ascii_lowercase());
+                match kind.as_deref() {
+                    Some("valid-user") => {
+                        if scope_stack.is_empty() {
+                            cfg.auth_required = true;
+                        } else {
+                            ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_required = true;
+                        }
+                    }
+                    Some("user") => {
+                        let users: Vec<String> = tokens[2..].iter().map(|s| s.to_string()).collect();
+                        if users.is_empty() {
+                            log::warn!(
+                                "[.htaccess] {}:{}: Require user with no names",
+                                file_path, line_no + 1
+                            );
+                        } else if scope_stack.is_empty() {
+                            cfg.auth_required = true;
+                            cfg.auth_required_users = Some(users);
+                        } else {
+                            let scope = ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack);
+                            scope.auth_required = true;
+                            scope.auth_required_users = Some(users);
+                        }
+                    }
+                    Some("ip") => {
+                        for tok in &tokens[2..] {
+                            match crate::access_control::parse_ip_matcher(tok) {
+                                Ok(m) => cfg.access_control.require_ip_allow.push(m),
+                                Err(e) => log::warn!(
+                                    "[.htaccess] {}:{}: malformed Require ip '{}': {}",
+                                    file_path, line_no + 1, tok, e
+                                ),
+                            }
+                        }
+                    }
+                    Some("not") => {
+                        if tokens.get(2).map(|s| s.to_ascii_lowercase()) == Some("ip".to_string()) {
+                            for tok in &tokens[3..] {
+                                match crate::access_control::parse_ip_matcher(tok) {
+                                    Ok(m) => cfg.access_control.require_ip_deny.push(m),
+                                    Err(e) => log::warn!(
+                                        "[.htaccess] {}:{}: malformed Require not ip '{}': {}",
+                                        file_path, line_no + 1, tok, e
+                                    ),
+                                }
+                            }
+                        } else {
+                            log::warn!(
+                                "[.htaccess] {}:{}: 'Require not' must be followed by 'ip' (other forms deferred)",
+                                file_path, line_no + 1
+                            );
+                        }
+                    }
+                    Some("group") => {
+                        log::warn!(
+                            "[.htaccess] {}:{}: 'Require group' not implemented (deferred sub-project)",
+                            file_path, line_no + 1
+                        );
+                    }
+                    Some(other) => {
+                        log::warn!(
+                            "[.htaccess] {}:{}: unsupported Require kind '{}'",
+                            file_path, line_no + 1, other
+                        );
+                    }
+                    None => {
+                        log::warn!(
+                            "[.htaccess] {}:{}: Require with no argument",
+                            file_path, line_no + 1
+                        );
                     }
                 }
             }
@@ -405,6 +479,60 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             "adddefaultcharset" => {
                 if tokens.len() > 1 {
                     cfg.add_default_charset = Some(tokens[1].to_string());
+                }
+            }
+
+            "order" => {
+                let raw = tokens[1..].join(" ").trim().to_ascii_lowercase();
+                use crate::access_control::Order;
+                cfg.access_control.order = match raw.as_str() {
+                    "allow,deny" | "allow, deny" => Order::AllowDeny,
+                    "deny,allow" | "deny, allow" => Order::DenyAllow,
+                    other => {
+                        log::warn!(
+                            "[.htaccess] {}:{}: unknown Order value '{}'",
+                            file_path, line_no + 1, other
+                        );
+                        cfg.access_control.order
+                    }
+                };
+            }
+
+            "allow" => {
+                if tokens.get(1).map(|s| s.to_ascii_lowercase()) != Some("from".to_string()) {
+                    log::warn!(
+                        "[.htaccess] {}:{}: expected 'from' after Allow",
+                        file_path, line_no + 1
+                    );
+                    continue;
+                }
+                for tok in &tokens[2..] {
+                    match crate::access_control::parse_ip_matcher(tok) {
+                        Ok(m) => cfg.access_control.allow_from.push(m),
+                        Err(e) => log::warn!(
+                            "[.htaccess] {}:{}: malformed Allow from '{}': {}",
+                            file_path, line_no + 1, tok, e
+                        ),
+                    }
+                }
+            }
+
+            "deny" => {
+                if tokens.get(1).map(|s| s.to_ascii_lowercase()) != Some("from".to_string()) {
+                    log::warn!(
+                        "[.htaccess] {}:{}: expected 'from' after Deny",
+                        file_path, line_no + 1
+                    );
+                    continue;
+                }
+                for tok in &tokens[2..] {
+                    match crate::access_control::parse_ip_matcher(tok) {
+                        Ok(m) => cfg.access_control.deny_from.push(m),
+                        Err(e) => log::warn!(
+                            "[.htaccess] {}:{}: malformed Deny from '{}': {}",
+                            file_path, line_no + 1, tok, e
+                        ),
+                    }
                 }
             }
 
@@ -534,6 +662,17 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 cfg.rewrite_engine = tokens.get(1)
                     .map(|s| s.eq_ignore_ascii_case("on"))
                     .unwrap_or(false);
+            }
+            "rewritebase" => {
+                if let Some(base) = tokens.get(1) {
+                    cfg.rewrite_base = Some(base.to_string());
+                } else {
+                    log::warn!(
+                        "[.htaccess] {}:{}: RewriteBase with no path",
+                        file_path,
+                        line_no + 1
+                    );
+                }
             }
             "rewritecond" => {
                 if tokens.len() >= 3 {
@@ -1213,6 +1352,14 @@ FileETag None
     }
 
     #[test]
+    fn parse_rewritebase() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "RewriteBase /app\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.rewrite_base.as_deref(), Some("/app"));
+    }
+
+    #[test]
     fn auth_directives_inside_filesmatch_populate_auth_scopes() {
         let tmp = TempDir::new().unwrap();
         write_htaccess(
@@ -1336,6 +1483,30 @@ FileETag None
                 captured()
             );
         });
+    }
+
+    #[test]
+    fn parse_require_user_populates_auth_required_users() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "AuthType Basic\nAuthName \"Test\"\nAuthUserFile /tmp/x\nRequire user alice bob\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert!(cfg.auth_required);
+        assert_eq!(
+            cfg.auth_required_users,
+            Some(vec!["alice".to_string(), "bob".to_string()])
+        );
+    }
+
+    #[test]
+    fn parse_allow_from_cidr() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "Order allow,deny\nAllow from 192.168.1.0/24\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.access_control.allow_from.len(), 1);
+        assert_eq!(cfg.access_control.order, crate::access_control::Order::AllowDeny);
     }
 
     #[test]

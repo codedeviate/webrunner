@@ -33,6 +33,7 @@ struct EffectiveAuth {
     auth_required: bool,
     auth_name: Option<String>,
     auth_user_file: Option<String>,
+    auth_required_users: Option<Vec<String>>,
 }
 
 fn resolve_auth_scope(
@@ -51,12 +52,14 @@ fn resolve_auth_scope(
             auth_required: s.auth_required,
             auth_name: s.auth_name.clone(),
             auth_user_file: s.auth_user_file.clone(),
+            auth_required_users: s.auth_required_users.clone(),
         };
     }
     EffectiveAuth {
         auth_required: htaccess.auth_required,
         auth_name: htaccess.auth_name.clone(),
         auth_user_file: htaccess.auth_user_file.clone(),
+        auth_required_users: htaccess.auth_required_users.clone(),
     }
 }
 
@@ -105,6 +108,12 @@ pub async fn handle_request(
             crate::htaccess::HtaccessConfig::default()
         }
     };
+
+    // IP access control (mod_authz_host) — runs before everything
+    // else so denied IPs don't trigger rewrites or auth.
+    if let Err(code) = crate::access_control::evaluate(&htaccess.access_control, peer_addr.ip()) {
+        return error_response(code, "Forbidden");
+    }
 
     let mut authenticated_user: Option<String> = None;
     // Redirect/Rewrite
@@ -178,7 +187,17 @@ pub async fn handle_request(
     if auth.auth_required {
         if let Some(user_file) = &auth.auth_user_file {
             match check_basic_auth(&req_headers, user_file) {
-                Some(user) => authenticated_user = Some(user),
+                Some(user) => {
+                    // If Require user <names> is set, the authenticated
+                    // username must appear in the allowed list.
+                    if let Some(allowed) = &auth.auth_required_users {
+                        if !allowed.contains(&user) {
+                            let realm = auth.auth_name.as_deref().unwrap_or("Restricted");
+                            return auth_challenge_response(realm);
+                        }
+                    }
+                    authenticated_user = Some(user);
+                }
                 None => {
                     let realm = auth.auth_name.as_deref().unwrap_or("Restricted");
                     return auth_challenge_response(realm);

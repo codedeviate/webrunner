@@ -27,7 +27,13 @@ Built for local development and quick prototyping. Not a production server.
     subset: emits `Cache-Control: max-age=N` and `Expires` headers
     based on response Content-Type; supports `access plus N <unit>`
     time-spec)
-  - `RewriteEngine`, `RewriteRule`, `RewriteCond` (incl. `[QSA]`, `[L]`, `[R]`)
+  - `Require valid-user` and `Require user <name>` for per-user
+    authorization (basic auth)
+  - `Allow from` / `Deny from` / `Order` (Apache 2.2 IP-based
+    access control) and `Require ip <CIDR>` / `Require not ip
+    <CIDR>` (Apache 2.4 syntax)
+  - `RewriteEngine`, `RewriteRule`, `RewriteCond` (incl. flags
+    `[QSA]`, `[L]`, `[R]`, `[NC]`, `[F]`, `[G]`), `RewriteBase`
   - `AuthType Basic` with `.htpasswd` (bcrypt, SHA-1, Apache MD5)
   - `Header set/add/unset/append/merge/setifempty/echo/edit/edit*`
     with `always|onsuccess` condition and basic placeholders

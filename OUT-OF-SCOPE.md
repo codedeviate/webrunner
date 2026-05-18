@@ -31,14 +31,9 @@ entry rather than leaving a crossed-out line here.
 
 ### `.htaccess` directives
 
-- `Allow` / `Deny` / `Require ip` for IP-based access control.
-- `Require user <name>` and `Require group` (currently only `valid-user`).
-- `AuthDigest` for digest auth.
-- `RewriteBase`, `RewriteMap`.
-- More `RewriteRule` flags: `[F]`, `[G]`, `[NC]`, `[P]`, `[E]`.
-  `[E=VAR:value]` depends on the env-var system (see `SetEnv` /
-  `SetEnvIf` under Deferred). `[P]` is reverse-proxy territory and
-  conflicts with the Out-of-scope policy.
+_(All previously waiting items have shipped or moved to Deferred /
+Out of scope. See `## Deferred` below for in-flight roadmap items
+and their blockers.)_
 
 ### CGI
 
@@ -101,6 +96,20 @@ entry rather than leaving a crossed-out line here.
 - **`RequestHeader` directive** — modifies request headers (different
   from `Header` which modifies responses). Adjacent to mod_headers
   subproject #4 (env-var system) but works on the request side.
+- **`AuthDigest`** — HTTP Digest authentication (RFC 7616).
+  Blocker: requires a full challenge-response implementation with
+  nonce tracking + `qop=auth-int` body integrity. Own sub-project;
+  no external dependency.
+- **`Require group <names>` + `AuthGroupFile`** — group-based
+  auth. Blocker: requires parsing Apache's group-file format
+  (`groupname: user1 user2 user3`) and resolving the
+  authenticated user's group memberships at auth time. Own
+  sub-project; small but distinct from `Require user`.
+- **`RewriteMap`** — map-table lookups in rewrite substitutions.
+  Blocker: multiple backend types (`txt`, `rnd`, `dbm`, `prg`).
+  `txt`/`rnd` are doable in-tree; `dbm` needs a Berkeley-DB
+  dependency; `prg` runs external child processes (security/
+  sandbox concerns).
 
 ## Not yet supported
 
@@ -125,3 +134,6 @@ entry rather than leaving a crossed-out line here.
   but no first-class WebSocket upgrade support is planned.
 - **Mutating HTTP methods on static files.** `PUT`, `DELETE` etc. on the
   static-file path return 405; webrunner is not a WebDAV server.
+- **`[P]` rewrite flag** (proxy pass). Requires reverse-proxy
+  infrastructure; conflicts with the existing "Reverse proxy /
+  load balancer is out of scope" policy.
