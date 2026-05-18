@@ -31,6 +31,26 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   in the same `.htaccess` overrides the mod_expires value
   (Apache semantics). `modification` base, legacy `A<N>`/`M<N>`
   short form, and multi-component specs remain deferred.
+- `Allow from <CIDR>`, `Deny from <CIDR>`, and `Order
+  allow,deny` / `Order deny,allow` directives in `.htaccess`
+  (Apache 2.2 legacy IP access control). CIDR notation supports
+  IPv4 and IPv6; bare addresses are treated as /32 or /128.
+- `Require ip <CIDR>` and `Require not ip <CIDR>` directives
+  (Apache 2.4 IP access control). Multiple `Require ip` lines OR
+  together; `Require not ip` denies on match. IP control runs
+  before rewrites and auth — denied requests get 403 without an
+  auth challenge.
+- `Require user <name>...` for per-user authorization. After
+  successful `AuthType Basic` auth, the authenticated username
+  must appear in the listed names; a mismatch returns 401
+  (re-challenge). `Require valid-user` semantics unchanged.
+  Scoped by `<FilesMatch>` like other auth directives.
+- `RewriteBase <path>` directive — prepended to relative
+  `RewriteRule` substitutions. Absolute substitutions (starting
+  with `/`, `http://`, etc.) are left unchanged.
+- `[F]` (Forbidden, 403) and `[G]` (Gone, 410) flags on
+  `RewriteRule`. Both produce status responses with no
+  `Location` header.
 
 ### Changed
 
