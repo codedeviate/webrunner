@@ -11,7 +11,7 @@ pub struct HtaccessConfig {
     pub auth_name: Option<String>,
     pub auth_user_file: Option<String>,
     pub error_documents: HashMap<u16, String>,
-    pub add_types: Vec<(String, String)>, // (extension, mime_type)
+    pub add_types: Vec<AddTypeEntry>,
     pub add_default_charset: Option<String>,
     pub redirects: Vec<RedirectRule>,
     pub rewrite_engine: bool,
@@ -42,6 +42,13 @@ pub struct RewriteRule {
     /// File-pattern scope from enclosing `<FilesMatch>` / `<Files>`
     /// containers. Empty = unscoped.
     pub file_scope: Vec<Regex>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddTypeEntry {
+    pub file_scope: Vec<Regex>,
+    pub ext: String,
+    pub mime: String,
 }
 
 impl Default for HtaccessConfig {
@@ -321,7 +328,11 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                                 ext_raw,
                             );
                         }
-                        cfg.add_types.push((ext, mime.clone()));
+                        cfg.add_types.push(AddTypeEntry {
+                            file_scope: scope_stack.clone(),
+                            ext,
+                            mime: mime.clone(),
+                        });
                     }
                 }
             }
@@ -574,7 +585,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_htaccess(tmp.path(), "AddType application/x-foo .foo\n");
         let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
-        assert!(cfg.add_types.iter().any(|(e, m)| e == "foo" && m == "application/x-foo"));
+        assert!(cfg.add_types.iter().any(|entry| entry.ext == "foo" && entry.mime == "application/x-foo"));
     }
 
     #[test]
@@ -823,12 +834,12 @@ mod tests {
         assert!(
             cfg.add_types
                 .iter()
-                .any(|(e, m)| e == "xls" && m == "application/vnd.ms-excel"),
+                .any(|entry| entry.ext == "xls" && entry.mime == "application/vnd.ms-excel"),
             "expected ('xls', 'application/vnd.ms-excel') in add_types; got {:?}",
             cfg.add_types,
         );
         assert!(
-            !cfg.add_types.iter().any(|(e, _)| e == "xls;"),
+            !cfg.add_types.iter().any(|entry| entry.ext == "xls;"),
             "extension should be stripped of trailing semicolon"
         );
     }
@@ -909,11 +920,11 @@ FileETag None
             );
             // AddType including the `xls;` typo case.
             assert!(
-                cfg.add_types.iter().any(|(e, _)| e == "xls"),
+                cfg.add_types.iter().any(|entry| entry.ext == "xls"),
                 "AddType xls; should strip to 'xls'"
             );
             assert!(
-                cfg.add_types.iter().any(|(e, _)| e == "json"),
+                cfg.add_types.iter().any(|entry| entry.ext == "json"),
                 "AddType json present"
             );
             assert_eq!(cfg.add_default_charset.as_deref(), Some("utf-8"));
@@ -993,6 +1004,21 @@ FileETag None
                 captured()
             );
         });
+    }
+
+    #[test]
+    fn addtype_scoped_under_filesmatch() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<FilesMatch \"\\.xls$\">\nAddType application/vnd.ms-excel xls\n</FilesMatch>\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.add_types.len(), 1);
+        let entry = &cfg.add_types[0];
+        assert_eq!(entry.ext, "xls");
+        assert_eq!(entry.mime, "application/vnd.ms-excel");
+        assert_eq!(entry.file_scope.len(), 1);
     }
 
     #[test]

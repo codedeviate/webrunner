@@ -219,7 +219,11 @@ async fn serve_static_file(
 
     // Compute content_type up front — needed for compression eligibility AND response.
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let content_type_raw = mime_for_ext_owned(ext, &htaccess.add_types);
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let content_type_raw = mime_for_ext_owned(ext, &htaccess.add_types, filename);
     let content_type = if let Some(charset) = &htaccess.add_default_charset {
         if !content_type_raw.contains("charset") {
             format!("{}; charset={}", content_type_raw, charset)
