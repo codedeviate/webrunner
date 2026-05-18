@@ -353,9 +353,12 @@ The crate is organised by concern:
   in the Features section. Unknown directives are warned and ignored.
 - `<IfModule>` blocks are treated as passthrough (their contents always
   apply, since webrunner implements the relevant module semantics
-  natively). `<FilesMatch>`, `<Files>`, `<Directory>`, `<If>` are
-  recognized as containers but their per-file scoping is not yet
-  implemented — contained directives apply globally. Common Apache
+  natively). `<FilesMatch "regex">` and `<Files "glob">` now scope
+  contained `Header`, `RewriteRule`, auth directives, and `AddType` to
+  files whose basename matches the pattern. `<Directory>` in
+  `.htaccess` is recognized but doesn't scope (Apache itself disallows
+  it there). `<If "expression">` is recognized but doesn't scope until
+  the expression evaluator ships. Common Apache
   directives webrunner does not implement (`php_flag`, `php_value`,
   `FileETag`, `RedirectMatch`, `AddEncoding`, `AddCharset`,
   `AddOutputFilterByType`, `SetEnv`, `SetEnvIf`, `SetEnvIfNoCase`,

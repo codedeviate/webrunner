@@ -88,10 +88,11 @@ entry rather than leaving a crossed-out line here.
 - **Regex named-capture placeholders (`%{NAME}r`).** Refers to
   named captures from rewrite rules. Requires rewrite engine
   refactor. Subproject #6.
-- **`<FilesMatch>` / `<Files>` / `<Directory>` per-file scoping** of
-  contained Header / Rewrite rules. Recognized as containers today
-  (no warns), but contained rules apply globally. Sub-project B of
-  the htaccess robustness roadmap.
+- **`<Directory>` in `.htaccess`** — Apache itself disallows it
+  there; webrunner follows. If actually-functional `<Directory>`
+  ever becomes useful (e.g., for nested per-directory `.htaccess`
+  merge override behaviour), it builds on sub-project B's scope
+  stack.
 - **`RedirectMatch <status> <regex> <to>`** — regex-based Redirect.
   Sub-project C.
 - **`mod_expires`** (`ExpiresActive`, `ExpiresDefault`,
