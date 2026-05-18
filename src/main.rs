@@ -3,6 +3,7 @@ mod auth;
 mod cgi;
 mod cli;
 mod compression;
+mod expires;
 mod handler;
 mod header_directive;
 mod htaccess;
