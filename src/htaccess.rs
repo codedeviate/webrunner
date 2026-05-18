@@ -382,7 +382,10 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                     .trim_start();
                 let loc = format!("{}:{}", file_path, line_no + 1);
                 match crate::header_directive::parse_header_line(after, &loc) {
-                    Ok(rule) => cfg.header_rules.push(rule),
+                    Ok(mut rule) => {
+                        rule.file_scope = scope_stack.clone();
+                        cfg.header_rules.push(rule);
+                    }
                     Err(reason) => log::warn!(
                         "[.htaccess] {}: malformed Header directive: {}",
                         loc,

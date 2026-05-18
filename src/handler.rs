@@ -125,6 +125,7 @@ pub async fn handle_request(
         protocol: &protocol,
         start_time: request_start,
         request_unix_micros,
+        filename: "",
     };
     crate::header_directive::apply_rules(
         &mut response,
