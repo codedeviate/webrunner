@@ -5,13 +5,9 @@
 //! `Cache-Control: max-age=N` and `Expires: <http-date>` headers
 //! based on the response's Content-Type.
 
-#[allow(unused_imports)]
 use axum::body::Body;
-#[allow(unused_imports)]
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, EXPIRES};
-#[allow(unused_imports)]
 use axum::http::{HeaderValue, Response};
-#[allow(unused_imports)]
 use std::time::{Duration, SystemTime};
 
 #[allow(dead_code)] // fields used in T2/T4
@@ -76,8 +72,44 @@ pub fn parse_expires_spec(spec: &str) -> Result<u64, String> {
 /// so user-specified `Header set Cache-Control` overrides our value
 /// (Apache semantics).
 #[allow(dead_code)] // wired into handle_request in T4
-pub fn apply_expires(_response: &mut Response<Body>, _cfg: &ExpiresConfig) {
-    // Body filled in by T2.
+pub fn apply_expires(response: &mut Response<Body>, cfg: &ExpiresConfig) {
+    if !cfg.active {
+        return;
+    }
+
+    // Look up the response's Content-Type; strip any "; charset=..." suffix.
+    let ct = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or(s).trim().to_string());
+
+    // `rfind` for Apache last-wins semantics when the same MIME is
+    // declared multiple times in the same .htaccess.
+    let secs = ct
+        .as_deref()
+        .and_then(|t| {
+            cfg.by_type
+                .iter()
+                .rfind(|(mime, _)| mime.eq_ignore_ascii_case(t))
+                .map(|(_, s)| *s)
+        })
+        .or(cfg.default);
+
+    let Some(secs) = secs else {
+        return;
+    };
+
+    let cache_control = format!("max-age={}", secs);
+    let expires_at = SystemTime::now() + Duration::from_secs(secs);
+    let expires_header = crate::static_files::http_date(expires_at);
+
+    if let Ok(hv) = HeaderValue::from_str(&cache_control) {
+        response.headers_mut().insert(CACHE_CONTROL, hv);
+    }
+    if let Ok(hv) = HeaderValue::from_str(&expires_header) {
+        response.headers_mut().insert(EXPIRES, hv);
+    }
 }
 
 #[cfg(test)]
@@ -122,5 +154,75 @@ mod tests {
     fn parse_expires_spec_unknown_unit_errs() {
         let err = parse_expires_spec("access plus 1 fortnight").unwrap_err();
         assert!(err.to_lowercase().contains("unknown unit"), "got: {}", err);
+    }
+
+    use axum::http::StatusCode;
+
+    fn make_response_with_ct(content_type: &str) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, content_type)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[test]
+    fn apply_expires_inactive_emits_nothing() {
+        let cfg = ExpiresConfig {
+            active: false,
+            default: Some(60),
+            by_type: vec![("text/css".to_string(), 31_536_000)],
+        };
+        let mut resp = make_response_with_ct("text/css");
+        apply_expires(&mut resp, &cfg);
+        assert!(resp.headers().get(CACHE_CONTROL).is_none());
+        assert!(resp.headers().get(EXPIRES).is_none());
+    }
+
+    #[test]
+    fn apply_expires_by_type_text_css_emits_max_age_year() {
+        let cfg = ExpiresConfig {
+            active: true,
+            default: Some(60),
+            by_type: vec![("text/css".to_string(), 31_536_000)],
+        };
+        let mut resp = make_response_with_ct("text/css");
+        apply_expires(&mut resp, &cfg);
+        assert_eq!(
+            resp.headers().get(CACHE_CONTROL).unwrap(),
+            "max-age=31536000"
+        );
+        let exp = resp.headers().get(EXPIRES);
+        assert!(exp.is_some(), "Expires header should be set");
+        let s = exp.unwrap().to_str().unwrap();
+        assert!(s.ends_with(" GMT"), "Expires should be HTTP-date; got: {}", s);
+    }
+
+    #[test]
+    fn apply_expires_strips_charset_suffix() {
+        let cfg = ExpiresConfig {
+            active: true,
+            default: None,
+            by_type: vec![("text/css".to_string(), 31_536_000)],
+        };
+        let mut resp = make_response_with_ct("text/css; charset=utf-8");
+        apply_expires(&mut resp, &cfg);
+        assert_eq!(
+            resp.headers().get(CACHE_CONTROL).unwrap(),
+            "max-age=31536000",
+            "charset suffix should not prevent the MIME match"
+        );
+    }
+
+    #[test]
+    fn apply_expires_default_falls_back_when_no_type_match() {
+        let cfg = ExpiresConfig {
+            active: true,
+            default: Some(60),
+            by_type: vec![("text/css".to_string(), 31_536_000)],
+        };
+        let mut resp = make_response_with_ct("application/json");
+        apply_expires(&mut resp, &cfg);
+        assert_eq!(resp.headers().get(CACHE_CONTROL).unwrap(), "max-age=60");
     }
 }
