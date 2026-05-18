@@ -1,6 +1,15 @@
 use regex::Regex;
 use crate::htaccess::HtaccessConfig;
 
+fn is_absolute_subst(s: &str) -> bool {
+    s.starts_with('/')
+        || s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("ftp://")
+        || s.starts_with("mailto:")
+        || s.starts_with("//")
+}
+
 #[derive(Debug)]
 pub enum RewriteResult {
     /// No rule matched — continue to normal routing
@@ -97,6 +106,27 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
                     subst.push('?');
                 }
                 subst.push_str(query);
+            }
+
+            // [F] flag — return 403 with no Location.
+            if rule.flags.iter().any(|f| f == "F") {
+                return RewriteResult::Redirect { status: 403, location: None };
+            }
+            // [G] flag — return 410 with no Location.
+            if rule.flags.iter().any(|f| f == "G") {
+                return RewriteResult::Redirect { status: 410, location: None };
+            }
+
+            // Apply RewriteBase to relative substitutions.
+            if let Some(base) = &cfg.rewrite_base {
+                if !is_absolute_subst(&subst) {
+                    let sep = if base.ends_with('/') || subst.starts_with('/') {
+                        ""
+                    } else {
+                        "/"
+                    };
+                    subst = format!("{}{}{}", base, sep, subst);
+                }
             }
 
             // R flag: treat as redirect
@@ -265,6 +295,86 @@ mod tests {
                 assert!(location.is_none(), "204 should have no Location");
             }
             other => panic!("expected Redirect; got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn apply_rewrite_f_flag_returns_403() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.rewrite_engine = true;
+        cfg.rewrite_rules.push(RewriteRule {
+            pattern: r"^secret/.*".to_string(),
+            substitution: "-".to_string(),
+            flags: vec!["F".to_string()],
+            conds: vec![],
+            file_scope: Vec::new(),
+        });
+        let result = apply_rewrites("/secret/file.txt", "", &cfg);
+        match result {
+            RewriteResult::Redirect { status, location } => {
+                assert_eq!(status, 403);
+                assert!(location.is_none(), "[F] should produce no Location");
+            }
+            other => panic!("expected Redirect(403); got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn apply_rewrite_g_flag_returns_410() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.rewrite_engine = true;
+        cfg.rewrite_rules.push(RewriteRule {
+            pattern: r"^gone-page$".to_string(),
+            substitution: "-".to_string(),
+            flags: vec!["G".to_string()],
+            conds: vec![],
+            file_scope: Vec::new(),
+        });
+        let result = apply_rewrites("/gone-page", "", &cfg);
+        match result {
+            RewriteResult::Redirect { status, location } => {
+                assert_eq!(status, 410);
+                assert!(location.is_none(), "[G] should produce no Location");
+            }
+            other => panic!("expected Redirect(410); got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn apply_rewritebase_prepends_to_relative_substitution() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.rewrite_engine = true;
+        cfg.rewrite_base = Some("/app".to_string());
+        cfg.rewrite_rules.push(RewriteRule {
+            pattern: r"^foo$".to_string(),
+            substitution: "bar".to_string(),
+            flags: vec![],
+            conds: vec![],
+            file_scope: Vec::new(),
+        });
+        let result = apply_rewrites("/foo", "", &cfg);
+        match result {
+            RewriteResult::Rewrite(p) => assert_eq!(p, "/app/bar"),
+            other => panic!("expected Rewrite(/app/bar); got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn apply_rewritebase_leaves_absolute_substitution_alone() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.rewrite_engine = true;
+        cfg.rewrite_base = Some("/app".to_string());
+        cfg.rewrite_rules.push(RewriteRule {
+            pattern: r"^foo$".to_string(),
+            substitution: "/already-absolute".to_string(),
+            flags: vec![],
+            conds: vec![],
+            file_scope: Vec::new(),
+        });
+        let result = apply_rewrites("/foo", "", &cfg);
+        match result {
+            RewriteResult::Rewrite(p) => assert_eq!(p, "/already-absolute"),
+            other => panic!("expected Rewrite(/already-absolute); got {:?}", other),
         }
     }
 

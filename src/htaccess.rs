@@ -18,6 +18,7 @@ pub struct HtaccessConfig {
     pub redirect_matches: Vec<RedirectMatchRule>,
     pub rewrite_engine: bool,
     pub rewrite_rules: Vec<RewriteRule>,
+    pub rewrite_base: Option<String>,
     pub header_rules: Vec<crate::header_directive::HeaderRule>,
     pub expires: crate::expires::ExpiresConfig,
 }
@@ -88,6 +89,7 @@ impl Default for HtaccessConfig {
             redirect_matches: Vec::new(),
             rewrite_engine: false,
             rewrite_rules: Vec::new(),
+            rewrite_base: None,
             header_rules: Vec::new(),
             expires: crate::expires::ExpiresConfig::default(),
         }
@@ -534,6 +536,17 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 cfg.rewrite_engine = tokens.get(1)
                     .map(|s| s.eq_ignore_ascii_case("on"))
                     .unwrap_or(false);
+            }
+            "rewritebase" => {
+                if let Some(base) = tokens.get(1) {
+                    cfg.rewrite_base = Some(base.to_string());
+                } else {
+                    log::warn!(
+                        "[.htaccess] {}:{}: RewriteBase with no path",
+                        file_path,
+                        line_no + 1
+                    );
+                }
             }
             "rewritecond" => {
                 if tokens.len() >= 3 {
@@ -1210,6 +1223,14 @@ FileETag None
                 captured()
             );
         });
+    }
+
+    #[test]
+    fn parse_rewritebase() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "RewriteBase /app\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.rewrite_base.as_deref(), Some("/app"));
     }
 
     #[test]
