@@ -447,18 +447,24 @@ mod tests {
         assert_eq!(cfg.header_rules.len(), 1);
     }
 
-    use std::sync::{Mutex, OnceLock};
+    use std::cell::RefCell;
+    use std::sync::Once;
 
     #[derive(Clone, Debug)]
-    #[allow(dead_code)]
     struct LogEntry {
         level: log::Level,
         msg: String,
     }
 
-    static LOG_CAPTURE: OnceLock<Mutex<Vec<LogEntry>>> = OnceLock::new();
-    static LOG_INIT: std::sync::Once = std::sync::Once::new();
-    static LOG_TEST_MUTEX: Mutex<()> = Mutex::new(());
+    thread_local! {
+        /// Per-thread log capture buffer. `Some(Vec)` when a capture-
+        /// using test is active on this thread; `None` otherwise.
+        /// Messages from threads with no active capture are dropped
+        /// by the logger, preventing cross-test bleed-through.
+        static CAPTURE: RefCell<Option<Vec<LogEntry>>> = const { RefCell::new(None) };
+    }
+
+    static LOG_INIT: Once = Once::new();
 
     struct CaptureLogger;
 
@@ -467,14 +473,14 @@ mod tests {
             true
         }
         fn log(&self, record: &log::Record) {
-            if let Some(buf) = LOG_CAPTURE.get() {
-                if let Ok(mut v) = buf.lock() {
-                    v.push(LogEntry {
+            CAPTURE.with(|cell| {
+                if let Some(buf) = cell.borrow_mut().as_mut() {
+                    buf.push(LogEntry {
                         level: record.level(),
                         msg: record.args().to_string(),
                     });
                 }
-            }
+            });
         }
         fn flush(&self) {}
     }
@@ -483,35 +489,25 @@ mod tests {
 
     fn install_log_capture() {
         LOG_INIT.call_once(|| {
-            let _ = LOG_CAPTURE.set(Mutex::new(Vec::new()));
             let _ = log::set_logger(&CAPTURE_LOGGER);
             log::set_max_level(log::LevelFilter::Debug);
         });
     }
 
-    fn clear_log() {
+    /// Run `f` with a fresh per-thread log capture. The capture is
+    /// thread-local, so multiple capture-using tests run in parallel
+    /// without serialization and without cross-thread bleed-through.
+    /// On panic in `f`, the unwind propagates after the capture is
+    /// reset on the next call (no poisoning is possible because no
+    /// mutex is held).
+    fn with_log_capture<F: FnOnce()>(f: F) {
         install_log_capture();
-        if let Some(buf) = LOG_CAPTURE.get() {
-            if let Ok(mut v) = buf.lock() {
-                v.clear();
-            }
-        }
+        CAPTURE.with(|cell| cell.replace(Some(Vec::new())));
+        f();
     }
 
     fn captured() -> Vec<LogEntry> {
-        LOG_CAPTURE
-            .get()
-            .and_then(|m| m.lock().ok().map(|v| v.clone()))
-            .unwrap_or_default()
-    }
-
-    /// Run `f` with the log-capture buffer cleared, holding the
-    /// capture mutex so concurrent capture-using tests don't race.
-    fn with_log_capture<F: FnOnce()>(f: F) {
-        install_log_capture();
-        let _guard = LOG_TEST_MUTEX.lock().unwrap();
-        clear_log();
-        f();
+        CAPTURE.with(|cell| cell.borrow().clone().unwrap_or_default())
     }
 
     #[allow(dead_code)]
