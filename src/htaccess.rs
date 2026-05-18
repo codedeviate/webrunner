@@ -265,9 +265,25 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             "addtype" => {
                 if tokens.len() >= 3 {
                     let mime = tokens[1].to_string();
-                    // extensions may have leading dot: .foo → foo
                     for ext_raw in &tokens[2..] {
-                        let ext = ext_raw.trim_start_matches('.').to_ascii_lowercase();
+                        // Strip trailing semicolons (some real-world
+                        // htaccess files mistakenly add them); then
+                        // strip a leading dot.
+                        let ext = ext_raw
+                            .trim_end_matches(';')
+                            .trim_start_matches('.')
+                            .to_ascii_lowercase();
+                        if ext.is_empty() {
+                            continue;
+                        }
+                        if ext_raw.ends_with(';') {
+                            log::debug!(
+                                "[.htaccess] {}:{}: stripped trailing ';' from AddType extension '{}'",
+                                file_path,
+                                line_no + 1,
+                                ext_raw,
+                            );
+                        }
                         cfg.add_types.push((ext, mime.clone()));
                     }
                 }
@@ -672,5 +688,30 @@ mod tests {
                 captured()
             );
         });
+    }
+
+    #[test]
+    fn addtype_strips_trailing_semicolons() {
+        // Real-world htaccess files sometimes use semicolons after
+        // extensions (`AddType ... xls;`). Apache itself stores them
+        // literally and the extension never matches — same as the
+        // pre-fix behaviour here. We strip them so the mapping works.
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "AddType application/vnd.ms-excel xls;\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert!(
+            cfg.add_types
+                .iter()
+                .any(|(e, m)| e == "xls" && m == "application/vnd.ms-excel"),
+            "expected ('xls', 'application/vnd.ms-excel') in add_types; got {:?}",
+            cfg.add_types,
+        );
+        assert!(
+            !cfg.add_types.iter().any(|(e, _)| e == "xls;"),
+            "extension should be stripped of trailing semicolon"
+        );
     }
 }
