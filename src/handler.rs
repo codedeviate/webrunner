@@ -26,6 +26,40 @@ pub struct AppState {
     pub access_log: Option<Arc<crate::access_log::AccessLog>>,
 }
 
+/// Effective auth settings for a request: either the LAST matching
+/// `AuthScope`, or the flat (unscoped) fields when no scope matches.
+#[derive(Debug, Clone)]
+struct EffectiveAuth {
+    auth_required: bool,
+    auth_name: Option<String>,
+    auth_user_file: Option<String>,
+}
+
+fn resolve_auth_scope(
+    htaccess: &crate::htaccess::HtaccessConfig,
+    filename: &str,
+) -> EffectiveAuth {
+    // Walk scopes in declaration order; LAST match wins (Apache merge order).
+    let mut chosen: Option<&crate::htaccess::AuthScope> = None;
+    for scope in &htaccess.auth_scopes {
+        if scope.file_scope.iter().all(|re| re.is_match(filename)) {
+            chosen = Some(scope);
+        }
+    }
+    if let Some(s) = chosen {
+        return EffectiveAuth {
+            auth_required: s.auth_required,
+            auth_name: s.auth_name.clone(),
+            auth_user_file: s.auth_user_file.clone(),
+        };
+    }
+    EffectiveAuth {
+        auth_required: htaccess.auth_required,
+        auth_name: htaccess.auth_name.clone(),
+        auth_user_file: htaccess.auth_user_file.clone(),
+    }
+}
+
 pub async fn handle_request(
     State(state): State<AppState>,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
@@ -72,23 +106,7 @@ pub async fn handle_request(
         }
     };
 
-    // Auth check
-    let mut authenticated_user: Option<String> = None; // consumed by Task 3 (response-extension stamp)
-    if htaccess.auth_required {
-        if let Some(user_file) = &htaccess.auth_user_file {
-            match check_basic_auth(&req_headers, user_file) {
-                Some(user) => authenticated_user = Some(user),
-                None => {
-                    let realm = htaccess.auth_name.as_deref().unwrap_or("Restricted");
-                    return auth_challenge_response(realm);
-                }
-            }
-        } else {
-            // auth_required but no AuthUserFile configured — deny access
-            log::warn!("[auth] auth_required but no AuthUserFile configured, denying access");
-            return error_response(403, "Forbidden");
-        }
-    }
+    let mut authenticated_user: Option<String> = None;
     // Redirect/Rewrite
     let mut response = match apply_rewrites(path_str, query, &htaccess) {
         RewriteResult::Redirect { status, location } => Response::builder()
@@ -118,6 +136,42 @@ pub async fn handle_request(
         }
     };
 
+    // Compute the resolved file's basename for scope-aware lookups.
+    // For directory listings, 404s, and rewrites that left no file
+    // resolved, fall back to the last URL-path segment.
+    let filename: String = {
+        let url_basename = path_str.rsplit('/').next().unwrap_or("");
+        if url_basename.is_empty() {
+            // Directory request — use the fs_path leaf when available.
+            fs_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string()
+        } else {
+            url_basename.to_string()
+        }
+    };
+
+    // Scope-aware auth check. Runs AFTER serve_path so the file is
+    // resolved; the LAST matching AuthScope (or the flat fields)
+    // applies.
+    let auth = resolve_auth_scope(&htaccess, &filename);
+    if auth.auth_required {
+        if let Some(user_file) = &auth.auth_user_file {
+            match check_basic_auth(&req_headers, user_file) {
+                Some(user) => authenticated_user = Some(user),
+                None => {
+                    let realm = auth.auth_name.as_deref().unwrap_or("Restricted");
+                    return auth_challenge_response(realm);
+                }
+            }
+        } else {
+            log::warn!("[auth] auth_required but no AuthUserFile configured, denying access");
+            return error_response(403, "Forbidden");
+        }
+    }
+
     let protocol = format!("{:?}", parts.version);
     let header_ctx = crate::header_directive::RequestContext {
         method: &parts.method,
@@ -125,7 +179,7 @@ pub async fn handle_request(
         protocol: &protocol,
         start_time: request_start,
         request_unix_micros,
-        filename: "",
+        filename: &filename,
     };
     crate::header_directive::apply_rules(
         &mut response,
@@ -456,6 +510,82 @@ mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
     use base64::{Engine, engine::general_purpose::STANDARD};
+
+    #[tokio::test]
+    async fn auth_scope_required_only_on_php() {
+        use axum::body::Body as AxumBody;
+        use axum::http::Request as AxumRequest;
+        use base64::Engine as _;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pw_path = dir.path().join(".htpasswd");
+        std::fs::write(&pw_path, "alice:{SHA}5en6G6MezRroT3XKqkdPOmY/BfQ=\n").unwrap();
+        let ht = format!(
+            "<FilesMatch \"\\.php$\">\nAuthType Basic\nAuthName \"Test\"\nAuthUserFile {}\nRequire valid-user\n</FilesMatch>\n",
+            pw_path.display()
+        );
+        std::fs::write(dir.path().join(".htaccess"), ht).unwrap();
+        std::fs::write(dir.path().join("public.html"), "ok").unwrap();
+        std::fs::write(
+            dir.path().join("private.php"),
+            "Content-Type: text/plain\n\nok",
+        )
+        .unwrap();
+
+        // --no-cgi php so .php is served as static; otherwise the test
+        // would depend on having a php interpreter installed.
+        use clap::Parser as _;
+        let config = Arc::new(crate::cli::CliConfig::parse_from(["webrunner", "--no-cgi", "php"]));
+        let state = AppState {
+            root: dir.path().to_path_buf(),
+            config: config.clone(),
+            access_log: None,
+        };
+
+        async fn build_req(path: &str, creds: Option<&str>) -> AxumRequest<AxumBody> {
+            let mut builder = AxumRequest::builder()
+                .method(axum::http::Method::GET)
+                .uri(path);
+            if let Some(c) = creds {
+                let enc = base64::engine::general_purpose::STANDARD.encode(c.as_bytes());
+                builder = builder.header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Basic {}", enc),
+                );
+            }
+            builder.body(AxumBody::empty()).unwrap()
+        }
+
+        let peer: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+        // 1. /public.html: 200 without creds.
+        let r = handle_request(
+            axum::extract::State(state.clone()),
+            axum::extract::ConnectInfo(peer),
+            build_req("/public.html", None).await,
+        )
+        .await;
+        assert_eq!(r.status().as_u16(), 200, "unscoped path should be public");
+
+        // 2. /private.php: 401 without creds.
+        let r = handle_request(
+            axum::extract::State(state.clone()),
+            axum::extract::ConnectInfo(peer),
+            build_req("/private.php", None).await,
+        )
+        .await;
+        assert_eq!(r.status().as_u16(), 401, "scoped .php path should require auth");
+
+        // 3. /private.php: 200 with valid creds.
+        let r = handle_request(
+            axum::extract::State(state.clone()),
+            axum::extract::ConnectInfo(peer),
+            build_req("/private.php", Some("alice:secret")).await,
+        )
+        .await;
+        assert_eq!(r.status().as_u16(), 200, "scoped .php with valid creds");
+    }
 
     /// Build a `HeaderMap` containing a `Basic` Authorization header
     /// for `<user>:<pass>`. Test helper.
