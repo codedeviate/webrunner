@@ -351,6 +351,17 @@ The crate is organised by concern:
 - CGI scripts inherit the parent's `PATH` so interpreters resolve correctly.
 - Only a practical subset of `.htaccess` is implemented — the directives listed
   in the Features section. Unknown directives are warned and ignored.
+- `<IfModule>` blocks are treated as passthrough (their contents always
+  apply, since webrunner implements the relevant module semantics
+  natively). `<FilesMatch>`, `<Files>`, `<Directory>`, `<If>` are
+  recognized as containers but their per-file scoping is not yet
+  implemented — contained directives apply globally. Common Apache
+  directives webrunner does not implement (`php_flag`, `php_value`,
+  `FileETag`, `RedirectMatch`, `AddEncoding`, `AddCharset`,
+  `AddOutputFilterByType`, `SetEnv`, `SetEnvIf`, `SetEnvIfNoCase`,
+  `RequestHeader`, `ExpiresActive`, `ExpiresDefault`, `ExpiresByType`,
+  `DirectorySlash`) are silently skipped — pass `--log-level debug`
+  to see what was skipped.
 
 ## License
 
