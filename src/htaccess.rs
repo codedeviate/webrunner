@@ -410,6 +410,34 @@ fn parse_flags(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Convert an Apache-style glob pattern to a regex string.
+///
+/// - `*` → `.*`
+/// - `?` → `.`
+/// - All regex metacharacters (`.`, `+`, `(`, `)`, `^`, `$`, `|`,
+///   `{`, `}`, `\`) are escaped.
+/// - Result is anchored with `^(?:...)$` so the pattern matches
+///   the whole basename, not a substring.
+/// - Brace expansion (`{a,b}`) is NOT supported — those characters
+///   are escaped to literals.
+#[allow(dead_code)] // wired in T2
+fn glob_to_regex(pat: &str) -> String {
+    let mut out = String::from("^(?:");
+    for c in pat.chars() {
+        match c {
+            '*' => out.push_str(".*"),
+            '?' => out.push('.'),
+            '.' | '+' | '(' | ')' | '^' | '$' | '|' | '{' | '}' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            other => out.push(other),
+        }
+    }
+    out.push_str(")$");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,5 +844,35 @@ FileETag None
                 warns,
             );
         });
+    }
+
+    #[test]
+    fn glob_to_regex_simple_star() {
+        let re_str = glob_to_regex("*.php");
+        let re = regex::Regex::new(&re_str).unwrap();
+        assert!(re.is_match("index.php"));
+        assert!(re.is_match("foo.php"));
+        assert!(!re.is_match("index.html"));
+        assert!(!re.is_match("foo.php.bak"));
+    }
+
+    #[test]
+    fn glob_to_regex_question_mark() {
+        let re_str = glob_to_regex("foo?.php");
+        let re = regex::Regex::new(&re_str).unwrap();
+        assert!(re.is_match("foo1.php"));
+        assert!(re.is_match("fooa.php"));
+        assert!(!re.is_match("foo.php"));
+        assert!(!re.is_match("foo12.php"));
+    }
+
+    #[test]
+    fn glob_to_regex_escapes_regex_metachars() {
+        // The dot in a glob is a LITERAL dot, not a regex metachar.
+        let re_str = glob_to_regex("a.b");
+        let re = regex::Regex::new(&re_str).unwrap();
+        assert!(re.is_match("a.b"));
+        assert!(!re.is_match("axb"));
+        assert!(!re.is_match("aXb"));
     }
 }
