@@ -298,6 +298,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn apply_rewrite_f_flag_returns_403() {
         let mut cfg = HtaccessConfig::default();
@@ -319,6 +320,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn apply_rewrite_g_flag_returns_410() {
         let mut cfg = HtaccessConfig::default();
@@ -340,6 +342,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn apply_rewritebase_prepends_to_relative_substitution() {
         let mut cfg = HtaccessConfig::default();
@@ -359,6 +362,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn apply_rewritebase_leaves_absolute_substitution_alone() {
         let mut cfg = HtaccessConfig::default();
