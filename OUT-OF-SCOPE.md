@@ -93,8 +93,6 @@ entry rather than leaving a crossed-out line here.
   ever becomes useful (e.g., for nested per-directory `.htaccess`
   merge override behaviour), it builds on sub-project B's scope
   stack.
-- **`RedirectMatch <status> <regex> <to>`** — regex-based Redirect.
-  Sub-project C.
 - **`mod_expires`** (`ExpiresActive`, `ExpiresDefault`,
   `ExpiresByType "access plus N <units>"`) emitting `Cache-Control:
   max-age=...` + `Expires:` headers. Sub-project D.

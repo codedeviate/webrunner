@@ -20,6 +20,9 @@ Built for local development and quick prototyping. Not a production server.
   - `ErrorDocument` for custom error pages
   - `AddType`, `AddDefaultCharset`
   - `Redirect` (301/302)
+  - `RedirectMatch` (regex-based redirect with `$N` capture
+    substitution; supports status-only forms like
+    `RedirectMatch 204 /favicon.ico$`)
   - `RewriteEngine`, `RewriteRule`, `RewriteCond` (incl. `[QSA]`, `[L]`, `[R]`)
   - `AuthType Basic` with `.htpasswd` (bcrypt, SHA-1, Apache MD5)
   - `Header set/add/unset/append/merge/setifempty/echo/edit/edit*`
@@ -360,7 +363,7 @@ The crate is organised by concern:
   it there). `<If "expression">` is recognized but doesn't scope until
   the expression evaluator ships. Common Apache
   directives webrunner does not implement (`php_flag`, `php_value`,
-  `FileETag`, `RedirectMatch`, `AddEncoding`, `AddCharset`,
+  `FileETag`, `AddEncoding`, `AddCharset`,
   `AddOutputFilterByType`, `SetEnv`, `SetEnvIf`, `SetEnvIfNoCase`,
   `RequestHeader`, `ExpiresActive`, `ExpiresDefault`, `ExpiresByType`,
   `DirectorySlash`) are silently skipped — pass `--log-level debug`
