@@ -52,11 +52,8 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
             }
         };
 
-        // Try matching the full path first (supports `^/` patterns); fall back
-        // to the slash-stripped form (Apache's default matching target).
         let match_path = path.trim_start_matches('/');
-        let caps_opt = re.captures(path).or_else(|| re.captures(match_path));
-        if let Some(caps) = caps_opt {
+        if let Some(caps) = re.captures(match_path) {
             // Check RewriteConds (all must match)
             if !eval_conds(&rule.conds, path) {
                 continue;
@@ -220,7 +217,7 @@ mod tests {
         let mut cfg = HtaccessConfig::default();
         cfg.rewrite_engine = true;
         cfg.rewrite_rules.push(RewriteRule {
-            pattern: "^/.*".to_string(),
+            pattern: "^.*".to_string(),
             substitution: "/rewritten".to_string(),
             flags: vec!["L".to_string()],
             conds: Vec::new(),
