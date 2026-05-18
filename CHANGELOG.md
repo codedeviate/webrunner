@@ -12,6 +12,25 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- `<FilesMatch "regex">` and `<Files "glob">` blocks in `.htaccess`
+  now apply per-file scoping to contained `Header`, `RewriteRule`,
+  auth directives (`AuthType`/`AuthName`/`AuthUserFile`/`Require`),
+  and `AddType`. Nested containers accumulate patterns — a rule
+  applies only when the requested file's basename matches ALL
+  ancestor patterns. `<Directory>` in `.htaccess` is recognized
+  but doesn't scope (Apache itself disallows it there).
+
+### Changed
+
+- Auth checks now run AFTER URL rewriting and file resolution
+  (previously they ran first). This matches Apache's behavior and
+  enables `<FilesMatch>`-scoped auth. For configs without
+  `<FilesMatch>`-scoped auth, the only observable change is in
+  edge cases where a `Redirect`/`RewriteRule` competes with auth:
+  the redirect/rewrite now wins (previously auth ran first).
+
 ### Fixed
 
 - `.htaccess` parser is now silent on real-world Apache files.

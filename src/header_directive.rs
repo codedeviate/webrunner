@@ -17,6 +17,11 @@ pub struct HeaderRule {
     pub action: HeaderAction,
     /// `"<file>:<line>"` for warn messages emitted at apply time.
     pub source_loc: String,
+    /// File-pattern scope from enclosing `<FilesMatch>` / `<Files>`
+    /// containers in the source `.htaccess`. Empty = unscoped
+    /// (applies globally). Non-empty = applies only when the
+    /// request's resolved file basename matches ALL listed regexes.
+    pub file_scope: Vec<Regex>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +84,10 @@ pub struct RequestContext<'a> {
     pub start_time: Instant,
     /// Wall-clock at request start in Unix microseconds. Used for `%t`.
     pub request_unix_micros: u64,
+    /// Basename of the resolved file being served (e.g. `"index.php"`).
+    /// For directory listings and 404 responses where no file is resolved,
+    /// this is the last URL path segment (or `""`).
+    pub filename: &'a str,
 }
 
 /// Compile a raw value string into a `ValueTemplate`.
@@ -212,8 +221,17 @@ pub fn apply_rules(
         if !condition_matches(rule.condition, response.status().as_u16()) {
             continue;
         }
+        if !file_matches(&rule.file_scope, ctx.filename) {
+            continue;
+        }
         apply_one(response, rule, request_headers, ctx);
     }
+}
+
+/// Returns `true` when every regex in `scope` matches `filename`.
+/// An empty scope (unscoped rule) trivially matches.
+fn file_matches(scope: &[Regex], filename: &str) -> bool {
+    scope.iter().all(|re| re.is_match(filename))
 }
 
 fn condition_matches(c: HeaderCondition, status: u16) -> bool {
@@ -443,6 +461,7 @@ pub fn parse_header_line(rest: &str, source_loc: &str) -> Result<HeaderRule, Str
             condition,
             action,
             source_loc: source_loc.to_string(),
+            file_scope: Vec::new(),
         });
     }
 
@@ -481,6 +500,7 @@ pub fn parse_header_line(rest: &str, source_loc: &str) -> Result<HeaderRule, Str
         condition,
         action,
         source_loc: source_loc.to_string(),
+        file_scope: Vec::new(),
     })
 }
 
@@ -720,11 +740,18 @@ mod tests {
     }
 
     fn make_ctx<'a>(m: &'a Method, u: &'a str, p: &'a str, start: Instant, utc: u64) -> RequestContext<'a> {
-        RequestContext { method: m, url_path: u, protocol: p, start_time: start, request_unix_micros: utc }
+        RequestContext {
+            method: m,
+            url_path: u,
+            protocol: p,
+            start_time: start,
+            request_unix_micros: utc,
+            filename: "",
+        }
     }
 
     fn rule(action: HeaderAction, condition: HeaderCondition) -> HeaderRule {
-        HeaderRule { condition, action, source_loc: "test:1".to_string() }
+        HeaderRule { condition, action, source_loc: "test:1".to_string(), file_scope: Vec::new() }
     }
 
     fn make_response(status: StatusCode) -> Response<Body> {
@@ -1029,5 +1056,111 @@ mod tests {
         let raw = resp.headers().get("x-d").unwrap().to_str().unwrap();
         let micros: u64 = raw.parse().expect("not a number");
         assert!(micros >= 10_000, "duration {} < 10ms", micros);
+    }
+
+    #[test]
+    fn apply_header_scoped_to_php_only_skips_html() {
+        let mut resp = make_response(StatusCode::OK);
+        let scope = vec![Regex::new("^.*\\.php$").unwrap()];
+        let rule = HeaderRule {
+            condition: HeaderCondition::OnSuccess,
+            action: HeaderAction::Set {
+                name: HeaderName::from_static("x-foo"),
+                value: compile_value_template("bar"),
+            },
+            source_loc: "test:1".to_string(),
+            file_scope: scope,
+        };
+        let rules = vec![rule];
+        let req = HeaderMap::new();
+        let m = Method::GET;
+        let u = "/index.html";
+        let p = "HTTP/1.1";
+        let ctx = RequestContext {
+            method: &m,
+            url_path: u,
+            protocol: p,
+            start_time: Instant::now(),
+            request_unix_micros: 0,
+            filename: "index.html",
+        };
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert!(resp.headers().get("x-foo").is_none());
+    }
+
+    #[test]
+    fn apply_header_scoped_to_php_only_applies_to_php() {
+        let mut resp = make_response(StatusCode::OK);
+        let scope = vec![Regex::new("^.*\\.php$").unwrap()];
+        let rule = HeaderRule {
+            condition: HeaderCondition::OnSuccess,
+            action: HeaderAction::Set {
+                name: HeaderName::from_static("x-foo"),
+                value: compile_value_template("bar"),
+            },
+            source_loc: "test:1".to_string(),
+            file_scope: scope,
+        };
+        let rules = vec![rule];
+        let req = HeaderMap::new();
+        let m = Method::GET;
+        let u = "/index.php";
+        let p = "HTTP/1.1";
+        let ctx = RequestContext {
+            method: &m,
+            url_path: u,
+            protocol: p,
+            start_time: Instant::now(),
+            request_unix_micros: 0,
+            filename: "index.php",
+        };
+        apply_rules(&mut resp, &rules, &req, &ctx);
+        assert_eq!(resp.headers().get("x-foo").unwrap(), "bar");
+    }
+
+    #[test]
+    fn apply_header_nested_scopes_all_must_match() {
+        let mut resp = make_response(StatusCode::OK);
+        let scope = vec![
+            Regex::new("^index").unwrap(),
+            Regex::new("\\.php$").unwrap(),
+        ];
+        let rule = HeaderRule {
+            condition: HeaderCondition::OnSuccess,
+            action: HeaderAction::Set {
+                name: HeaderName::from_static("x-foo"),
+                value: compile_value_template("bar"),
+            },
+            source_loc: "test:1".to_string(),
+            file_scope: scope,
+        };
+        let rules = vec![rule];
+        let req = HeaderMap::new();
+        let m = Method::GET;
+        let u = "/admin/index.php";
+        let p = "HTTP/1.1";
+
+        let ctx_match = RequestContext {
+            method: &m,
+            url_path: u,
+            protocol: p,
+            start_time: Instant::now(),
+            request_unix_micros: 0,
+            filename: "index.php",
+        };
+        apply_rules(&mut resp, &rules, &req, &ctx_match);
+        assert_eq!(resp.headers().get("x-foo").unwrap(), "bar");
+
+        let mut resp2 = make_response(StatusCode::OK);
+        let ctx_partial = RequestContext {
+            method: &m,
+            url_path: u,
+            protocol: p,
+            start_time: Instant::now(),
+            request_unix_micros: 0,
+            filename: "index.html",
+        };
+        apply_rules(&mut resp2, &rules, &req, &ctx_partial);
+        assert!(resp2.headers().get("x-foo").is_none());
     }
 }

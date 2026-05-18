@@ -31,7 +31,13 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
         return RewriteResult::None;
     }
 
+    let basename = path.rsplit('/').next().unwrap_or("");
+
     for rule in &cfg.rewrite_rules {
+        // Skip rules scoped to filenames that don't match this request.
+        if !rule.file_scope.iter().all(|re| re.is_match(basename)) {
+            continue;
+        }
         let nc = rule.flags.iter().any(|f| f == "NC");
         let re = if nc {
             Regex::new(&format!("(?i){}", rule.pattern))
@@ -46,7 +52,6 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
             }
         };
 
-        // Strip leading slash for matching (Apache matches against the path without leading slash)
         let match_path = path.trim_start_matches('/');
         if let Some(caps) = re.captures(match_path) {
             // Check RewriteConds (all must match)
@@ -155,6 +160,7 @@ mod tests {
             substitution: "/bar/$1".to_string(),
             flags: vec![],
             conds: vec![],
+            file_scope: Vec::new(),
         });
         let result = apply_rewrites("/foo/baz", "", &cfg);
         assert!(matches!(result, RewriteResult::Rewrite(ref p) if p == "/bar/baz"));
@@ -169,6 +175,7 @@ mod tests {
             substitution: "https://example.com".to_string(),
             flags: vec!["R=302".to_string()],
             conds: vec![],
+            file_scope: Vec::new(),
         });
         let result = apply_rewrites("/go", "", &cfg);
         assert!(matches!(result, RewriteResult::Redirect { status: 302, .. }));
@@ -183,6 +190,7 @@ mod tests {
             substitution: "/bar".to_string(),
             flags: vec![],
             conds: vec![],
+            file_scope: Vec::new(),
         });
         let result = apply_rewrites("/foo", "", &cfg);
         assert!(matches!(result, RewriteResult::None));
@@ -197,8 +205,35 @@ mod tests {
             substitution: "/index.php".to_string(),
             flags: vec!["QSA".to_string()],
             conds: vec![],
+            file_scope: Vec::new(),
         });
         let result = apply_rewrites("/page", "lang=en", &cfg);
         assert!(matches!(result, RewriteResult::Rewrite(ref p) if p == "/index.php?lang=en"));
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn apply_rewrites_respects_file_scope() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.rewrite_engine = true;
+        cfg.rewrite_rules.push(RewriteRule {
+            pattern: "^.*".to_string(),
+            substitution: "/rewritten".to_string(),
+            flags: vec!["L".to_string()],
+            conds: Vec::new(),
+            file_scope: vec![regex::Regex::new("^.*\\.php$").unwrap()],
+        });
+
+        // PHP request → rule fires.
+        match apply_rewrites("/foo.php", "", &cfg) {
+            RewriteResult::Rewrite(p) => assert_eq!(p, "/rewritten"),
+            other => panic!("expected Rewrite for /foo.php, got {:?}", other),
+        }
+
+        // HTML request → rule does NOT fire (basename doesn't match).
+        match apply_rewrites("/foo.html", "", &cfg) {
+            RewriteResult::None => {}
+            other => panic!("expected None for /foo.html, got {:?}", other),
+        }
     }
 }

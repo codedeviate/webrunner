@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use regex::Regex;
 
 /// Merged configuration from all applicable .htaccess files for a request path.
 #[derive(Debug, Clone)]
@@ -9,8 +10,9 @@ pub struct HtaccessConfig {
     pub auth_required: bool,
     pub auth_name: Option<String>,
     pub auth_user_file: Option<String>,
+    pub auth_scopes: Vec<AuthScope>,
     pub error_documents: HashMap<u16, String>,
-    pub add_types: Vec<(String, String)>, // (extension, mime_type)
+    pub add_types: Vec<AddTypeEntry>,
     pub add_default_charset: Option<String>,
     pub redirects: Vec<RedirectRule>,
     pub rewrite_engine: bool,
@@ -38,6 +40,24 @@ pub struct RewriteRule {
     pub substitution: String,
     pub flags: Vec<String>,
     pub conds: Vec<RewriteCond>,
+    /// File-pattern scope from enclosing `<FilesMatch>` / `<Files>`
+    /// containers. Empty = unscoped.
+    pub file_scope: Vec<Regex>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddTypeEntry {
+    pub file_scope: Vec<Regex>,
+    pub ext: String,
+    pub mime: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthScope {
+    pub file_scope: Vec<Regex>,
+    pub auth_required: bool,
+    pub auth_name: Option<String>,
+    pub auth_user_file: Option<String>,
 }
 
 impl Default for HtaccessConfig {
@@ -48,6 +68,7 @@ impl Default for HtaccessConfig {
             auth_required: false,
             auth_name: None,
             auth_user_file: None,
+            auth_scopes: Vec::new(),
             error_documents: HashMap::new(),
             add_types: Vec::new(),
             add_default_charset: None,
@@ -202,8 +223,70 @@ fn is_known_unsupported(tok: &str) -> bool {
     )
 }
 
+/// Extract the quoted-or-bare pattern argument from a container open
+/// tag like `<FilesMatch "\.php$">` or `<Files *.css>`. Returns the
+/// pattern text without the surrounding quotes or trailing `>`.
+///
+/// `tokens` is the already-split tokens for the line; `tokens[0]` is
+/// the open tag itself (`<FilesMatch` or `<Files`).
+///
+/// Examples:
+/// - `<FilesMatch "\.php$">` → `Some("\\.php$")`
+/// - `<Files *.css>` → `Some("*.css")`
+/// - `<FilesMatch>` (no arg) → `None`
+fn extract_container_pattern(tokens: &[&str]) -> Option<String> {
+    if tokens.len() < 2 {
+        return None;
+    }
+    let joined = tokens[1..].join(" ");
+    let trimmed = joined.trim_end_matches('>').trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
+    }
+}
+
+/// Returns a mutable reference to the `AuthScope` whose `file_scope`
+/// matches the given `current` scope stack (by regex source-string
+/// equality), pushing a new one if no match exists.
+///
+/// Source-string equality is used because `Regex` itself isn't `Eq`,
+/// and source-string equality correctly groups together auth
+/// directives that appear inside the same `<FilesMatch>` block (they
+/// share the same scope_stack snapshot at that point).
+fn ensure_auth_scope<'a>(
+    scopes: &'a mut Vec<AuthScope>,
+    current: &[Regex],
+) -> &'a mut AuthScope {
+    let existing_idx = scopes.iter().position(|s| {
+        s.file_scope.len() == current.len()
+            && s.file_scope
+                .iter()
+                .zip(current.iter())
+                .all(|(a, b)| a.as_str() == b.as_str())
+    });
+    match existing_idx {
+        Some(i) => &mut scopes[i],
+        None => {
+            scopes.push(AuthScope {
+                file_scope: current.to_vec(),
+                auth_required: false,
+                auth_name: None,
+                auth_user_file: None,
+            });
+            scopes.last_mut().unwrap()
+        }
+    }
+}
+
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
     let mut pending_conds: Vec<RewriteCond> = Vec::new();
+    let mut scope_stack: Vec<Regex> = Vec::new();
 
     for (line_no, raw_line) in content.lines().enumerate() {
         let line = raw_line.trim();
@@ -244,17 +327,30 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             "authname" => {
                 if tokens.len() > 1 {
                     let name = tokens[1..].join(" ").trim_matches('"').to_string();
-                    cfg.auth_name = Some(name);
+                    if scope_stack.is_empty() {
+                        cfg.auth_name = Some(name);
+                    } else {
+                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_name = Some(name);
+                    }
                 }
             }
             "authuserfile" => {
                 if tokens.len() > 1 {
-                    cfg.auth_user_file = Some(tokens[1].to_string());
+                    let path = tokens[1].to_string();
+                    if scope_stack.is_empty() {
+                        cfg.auth_user_file = Some(path);
+                    } else {
+                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_user_file = Some(path);
+                    }
                 }
             }
             "require" => {
                 if tokens.get(1).map(|s| s.to_ascii_lowercase()) == Some("valid-user".to_string()) {
-                    cfg.auth_required = true;
+                    if scope_stack.is_empty() {
+                        cfg.auth_required = true;
+                    } else {
+                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_required = true;
+                    }
                 }
             }
             "errordocument" => {
@@ -288,7 +384,11 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                                 ext_raw,
                             );
                         }
-                        cfg.add_types.push((ext, mime.clone()));
+                        cfg.add_types.push(AddTypeEntry {
+                            file_scope: scope_stack.clone(),
+                            ext,
+                            mime: mime.clone(),
+                        });
                     }
                 }
             }
@@ -339,6 +439,7 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                         substitution: tokens[2].to_string(),
                         flags,
                         conds: std::mem::take(&mut pending_conds),
+                        file_scope: scope_stack.clone(),
                     });
                 }
             }
@@ -352,7 +453,10 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                     .trim_start();
                 let loc = format!("{}:{}", file_path, line_no + 1);
                 match crate::header_directive::parse_header_line(after, &loc) {
-                    Ok(rule) => cfg.header_rules.push(rule),
+                    Ok(mut rule) => {
+                        rule.file_scope = scope_stack.clone();
+                        cfg.header_rules.push(rule);
+                    }
                     Err(reason) => log::warn!(
                         "[.htaccess] {}: malformed Header directive: {}",
                         loc,
@@ -365,17 +469,56 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 let kind = container_open_kind(t).unwrap();
                 match kind {
                     ContainerKind::IfModule => {
-                        // True passthrough — webrunner implements the
-                        // semantic equivalents of mod_headers / mod_mime
-                        // / mod_alias / etc. natively, so <IfModule>
-                        // wrapping has no effect.
+                        // Silent passthrough; webrunner natively implements
+                        // the module semantics.
                     }
-                    ContainerKind::FilesMatch
-                    | ContainerKind::Files
-                    | ContainerKind::Directory
-                    | ContainerKind::If => {
+                    ContainerKind::FilesMatch => {
+                        let raw_pat = extract_container_pattern(&tokens);
+                        match raw_pat.as_deref().map(Regex::new) {
+                            Some(Ok(re)) => scope_stack.push(re),
+                            Some(Err(e)) => log::warn!(
+                                "[.htaccess] {}:{}: malformed FilesMatch pattern '{}': {}",
+                                file_path,
+                                line_no + 1,
+                                raw_pat.as_deref().unwrap_or(""),
+                                e
+                            ),
+                            None => log::warn!(
+                                "[.htaccess] {}:{}: <FilesMatch> missing pattern",
+                                file_path,
+                                line_no + 1
+                            ),
+                        }
+                    }
+                    ContainerKind::Files => {
+                        let raw_pat = extract_container_pattern(&tokens);
+                        match raw_pat.as_deref() {
+                            Some(pat) => {
+                                let re_str = glob_to_regex(pat);
+                                match Regex::new(&re_str) {
+                                    Ok(re) => scope_stack.push(re),
+                                    Err(e) => log::warn!(
+                                        "[.htaccess] {}:{}: malformed Files pattern '{}': {}",
+                                        file_path,
+                                        line_no + 1,
+                                        pat,
+                                        e
+                                    ),
+                                }
+                            }
+                            None => log::warn!(
+                                "[.htaccess] {}:{}: <Files> missing pattern",
+                                file_path,
+                                line_no + 1
+                            ),
+                        }
+                    }
+                    ContainerKind::Directory | ContainerKind::If => {
+                        // Recognized but not scoping (Directory is invalid
+                        // in .htaccess per Apache; If needs an expression
+                        // evaluator). Contained rules apply globally.
                         log::debug!(
-                            "[.htaccess] {}:{}: container '{}' applies globally until per-file scoping ships",
+                            "[.htaccess] {}:{}: container '{}' is recognized but does not yet scope contained rules",
                             file_path,
                             line_no + 1,
                             tokens[0]
@@ -384,7 +527,21 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 }
             }
             t if is_container_close(t) => {
-                // Symmetric to the open form; same passthrough semantics.
+                let lower = t.to_ascii_lowercase();
+                match lower.as_str() {
+                    "</filesmatch>" | "</files>" => match scope_stack.pop() {
+                        Some(_) => {}
+                        None => log::warn!(
+                            "[.htaccess] {}:{}: unmatched '{}'",
+                            file_path,
+                            line_no + 1,
+                            tokens[0]
+                        ),
+                    },
+                    _ => {
+                        // </IfModule>, </Directory>, </If> are no-ops.
+                    }
+                }
             }
             t if is_known_unsupported(t) => {
                 log::debug!(
@@ -408,6 +565,33 @@ fn parse_flags(raw: &str) -> Vec<String> {
         .map(|f| f.trim().to_ascii_uppercase())
         .filter(|f| !f.is_empty())
         .collect()
+}
+
+/// Convert an Apache-style glob pattern to a regex string.
+///
+/// - `*` → `.*`
+/// - `?` → `.`
+/// - All regex metacharacters (`.`, `+`, `(`, `)`, `^`, `$`, `|`,
+///   `{`, `}`, `\`) are escaped.
+/// - Result is anchored with `^(?:...)$` so the pattern matches
+///   the whole basename, not a substring.
+/// - Brace expansion (`{a,b}`) is NOT supported — those characters
+///   are escaped to literals.
+fn glob_to_regex(pat: &str) -> String {
+    let mut out = String::from("^(?:");
+    for c in pat.chars() {
+        match c {
+            '*' => out.push_str(".*"),
+            '?' => out.push('.'),
+            '.' | '+' | '(' | ')' | '^' | '$' | '|' | '{' | '}' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            other => out.push(other),
+        }
+    }
+    out.push_str(")$");
+    out
 }
 
 #[cfg(test)]
@@ -457,7 +641,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write_htaccess(tmp.path(), "AddType application/x-foo .foo\n");
         let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
-        assert!(cfg.add_types.iter().any(|(e, m)| e == "foo" && m == "application/x-foo"));
+        assert!(cfg.add_types.iter().any(|entry| entry.ext == "foo" && entry.mime == "application/x-foo"));
     }
 
     #[test]
@@ -646,15 +830,12 @@ mod tests {
             );
             let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
             assert_eq!(cfg.header_rules.len(), 1);
+            // Now that scope_stack is wired, a balanced <FilesMatch> produces
+            // no log output at any level (scope push/pop is silent).
             assert_eq!(
                 count_at_level(log::Level::Warn),
                 0,
                 "<FilesMatch> wrap should produce no warn-level logs; got: {:?}",
-                captured()
-            );
-            assert!(
-                has_log_at_level(log::Level::Debug, "<FilesMatch"),
-                "expected a debug log about <FilesMatch> container; got: {:?}",
                 captured()
             );
         });
@@ -709,12 +890,12 @@ mod tests {
         assert!(
             cfg.add_types
                 .iter()
-                .any(|(e, m)| e == "xls" && m == "application/vnd.ms-excel"),
+                .any(|entry| entry.ext == "xls" && entry.mime == "application/vnd.ms-excel"),
             "expected ('xls', 'application/vnd.ms-excel') in add_types; got {:?}",
             cfg.add_types,
         );
         assert!(
-            !cfg.add_types.iter().any(|(e, _)| e == "xls;"),
+            !cfg.add_types.iter().any(|entry| entry.ext == "xls;"),
             "extension should be stripped of trailing semicolon"
         );
     }
@@ -795,11 +976,11 @@ FileETag None
             );
             // AddType including the `xls;` typo case.
             assert!(
-                cfg.add_types.iter().any(|(e, _)| e == "xls"),
+                cfg.add_types.iter().any(|entry| entry.ext == "xls"),
                 "AddType xls; should strip to 'xls'"
             );
             assert!(
-                cfg.add_types.iter().any(|(e, _)| e == "json"),
+                cfg.add_types.iter().any(|entry| entry.ext == "json"),
                 "AddType json present"
             );
             assert_eq!(cfg.add_default_charset.as_deref(), Some("utf-8"));
@@ -816,5 +997,158 @@ FileETag None
                 warns,
             );
         });
+    }
+
+    #[test]
+    fn glob_to_regex_simple_star() {
+        let re_str = glob_to_regex("*.php");
+        let re = regex::Regex::new(&re_str).unwrap();
+        assert!(re.is_match("index.php"));
+        assert!(re.is_match("foo.php"));
+        assert!(!re.is_match("index.html"));
+        assert!(!re.is_match("foo.php.bak"));
+    }
+
+    #[test]
+    fn glob_to_regex_question_mark() {
+        let re_str = glob_to_regex("foo?.php");
+        let re = regex::Regex::new(&re_str).unwrap();
+        assert!(re.is_match("foo1.php"));
+        assert!(re.is_match("fooa.php"));
+        assert!(!re.is_match("foo.php"));
+        assert!(!re.is_match("foo12.php"));
+    }
+
+    #[test]
+    fn glob_to_regex_escapes_regex_metachars() {
+        // The dot in a glob is a LITERAL dot, not a regex metachar.
+        let re_str = glob_to_regex("a.b");
+        let re = regex::Regex::new(&re_str).unwrap();
+        assert!(re.is_match("a.b"));
+        assert!(!re.is_match("axb"));
+        assert!(!re.is_match("aXb"));
+    }
+
+    #[test]
+    fn scope_stack_filesmatch_pushes_and_pops() {
+        // Without scoping support in T3, a Header rule inside
+        // <FilesMatch> has no file_scope (T3 wires that). This test
+        // asserts the parser correctly opens and closes scope on a
+        // balanced pair without errors.
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "<FilesMatch \"\\.php$\">\nHeader set X-Foo bar\n</FilesMatch>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.header_rules.len(), 1);
+            // No warn-level logs: balanced FilesMatch is clean.
+            assert_eq!(count_at_level(log::Level::Warn), 0);
+        });
+    }
+
+    #[test]
+    fn unmatched_filesmatch_close_warns() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "</FilesMatch>\n");
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert!(
+                has_log_at_level(log::Level::Warn, "unmatched"),
+                "expected unmatched-close warn; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn addtype_scoped_under_filesmatch() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<FilesMatch \"\\.xls$\">\nAddType application/vnd.ms-excel xls\n</FilesMatch>\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.add_types.len(), 1);
+        let entry = &cfg.add_types[0];
+        assert_eq!(entry.ext, "xls");
+        assert_eq!(entry.mime, "application/vnd.ms-excel");
+        assert_eq!(entry.file_scope.len(), 1);
+    }
+
+    #[test]
+    fn malformed_filesmatch_pattern_warns_does_not_crash() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            // `[invalid` is an unclosed character class — regex compile fails.
+            write_htaccess(
+                tmp.path(),
+                "<FilesMatch \"[invalid\">\nHeader set X-After bar\n</FilesMatch>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            // The Header rule after the malformed FilesMatch still parses.
+            assert_eq!(cfg.header_rules.len(), 1);
+            // A warn mentions the malformed pattern.
+            assert!(
+                has_log_at_level(log::Level::Warn, "malformed FilesMatch"),
+                "expected malformed FilesMatch warn; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn auth_directives_inside_filesmatch_populate_auth_scopes() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<FilesMatch \"\\.php$\">\nAuthType Basic\nAuthName \"PHP Only\"\nAuthUserFile /tmp/x\nRequire valid-user\n</FilesMatch>\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        // No flat (unscoped) auth.
+        assert!(!cfg.auth_required, "flat auth_required should be false");
+        assert!(cfg.auth_user_file.is_none(), "flat auth_user_file should be None");
+        // One scoped entry.
+        assert_eq!(cfg.auth_scopes.len(), 1);
+        let scope = &cfg.auth_scopes[0];
+        assert!(scope.auth_required);
+        assert_eq!(scope.auth_user_file.as_deref(), Some("/tmp/x"));
+        assert_eq!(scope.auth_name.as_deref(), Some("PHP Only"));
+        assert_eq!(scope.file_scope.len(), 1);
+    }
+
+    #[test]
+    fn filesmatch_real_world_user_htaccess_subset() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<FilesMatch \"\\.php$\">\n  Header set Cache-Control \"no-cache\"\n</FilesMatch>\nHeader set X-Always yes\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.header_rules.len(), 2);
+
+        // The first rule is inside <FilesMatch>: file_scope has 1 entry.
+        let r0 = &cfg.header_rules[0];
+        assert_eq!(r0.file_scope.len(), 1, "first rule should be scoped");
+
+        // The second rule is outside: file_scope is empty.
+        let r1 = &cfg.header_rules[1];
+        assert_eq!(r1.file_scope.len(), 0, "second rule should be unscoped");
+    }
+
+    #[test]
+    fn files_glob_simple() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<Files \"*.css\">\nHeader set X-Css 1\n</Files>\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.header_rules.len(), 1);
+        let scope = &cfg.header_rules[0].file_scope;
+        assert_eq!(scope.len(), 1);
+        assert!(scope[0].is_match("style.css"));
+        assert!(!scope[0].is_match("style.js"));
     }
 }
