@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use regex::Regex;
 
 /// Merged configuration from all applicable .htaccess files for a request path.
 #[derive(Debug, Clone)]
@@ -202,8 +203,37 @@ fn is_known_unsupported(tok: &str) -> bool {
     )
 }
 
+/// Extract the quoted-or-bare pattern argument from a container open
+/// tag like `<FilesMatch "\.php$">` or `<Files *.css>`. Returns the
+/// pattern text without the surrounding quotes or trailing `>`.
+///
+/// `tokens` is the already-split tokens for the line; `tokens[0]` is
+/// the open tag itself (`<FilesMatch` or `<Files`).
+///
+/// Examples:
+/// - `<FilesMatch "\.php$">` → `Some("\\.php$")`
+/// - `<Files *.css>` → `Some("*.css")`
+/// - `<FilesMatch>` (no arg) → `None`
+fn extract_container_pattern(tokens: &[&str]) -> Option<String> {
+    if tokens.len() < 2 {
+        return None;
+    }
+    let joined = tokens[1..].join(" ");
+    let trimmed = joined.trim_end_matches('>').trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
+    }
+}
+
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
     let mut pending_conds: Vec<RewriteCond> = Vec::new();
+    let mut scope_stack: Vec<Regex> = Vec::new();
 
     for (line_no, raw_line) in content.lines().enumerate() {
         let line = raw_line.trim();
@@ -365,17 +395,56 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 let kind = container_open_kind(t).unwrap();
                 match kind {
                     ContainerKind::IfModule => {
-                        // True passthrough — webrunner implements the
-                        // semantic equivalents of mod_headers / mod_mime
-                        // / mod_alias / etc. natively, so <IfModule>
-                        // wrapping has no effect.
+                        // Silent passthrough; webrunner natively implements
+                        // the module semantics.
                     }
-                    ContainerKind::FilesMatch
-                    | ContainerKind::Files
-                    | ContainerKind::Directory
-                    | ContainerKind::If => {
+                    ContainerKind::FilesMatch => {
+                        let raw_pat = extract_container_pattern(&tokens);
+                        match raw_pat.as_deref().map(Regex::new) {
+                            Some(Ok(re)) => scope_stack.push(re),
+                            Some(Err(e)) => log::warn!(
+                                "[.htaccess] {}:{}: malformed FilesMatch pattern '{}': {}",
+                                file_path,
+                                line_no + 1,
+                                raw_pat.as_deref().unwrap_or(""),
+                                e
+                            ),
+                            None => log::warn!(
+                                "[.htaccess] {}:{}: <FilesMatch> missing pattern",
+                                file_path,
+                                line_no + 1
+                            ),
+                        }
+                    }
+                    ContainerKind::Files => {
+                        let raw_pat = extract_container_pattern(&tokens);
+                        match raw_pat.as_deref() {
+                            Some(pat) => {
+                                let re_str = glob_to_regex(pat);
+                                match Regex::new(&re_str) {
+                                    Ok(re) => scope_stack.push(re),
+                                    Err(e) => log::warn!(
+                                        "[.htaccess] {}:{}: malformed Files pattern '{}': {}",
+                                        file_path,
+                                        line_no + 1,
+                                        pat,
+                                        e
+                                    ),
+                                }
+                            }
+                            None => log::warn!(
+                                "[.htaccess] {}:{}: <Files> missing pattern",
+                                file_path,
+                                line_no + 1
+                            ),
+                        }
+                    }
+                    ContainerKind::Directory | ContainerKind::If => {
+                        // Recognized but not scoping (Directory is invalid
+                        // in .htaccess per Apache; If needs an expression
+                        // evaluator). Contained rules apply globally.
                         log::debug!(
-                            "[.htaccess] {}:{}: container '{}' applies globally until per-file scoping ships",
+                            "[.htaccess] {}:{}: container '{}' is recognized but does not yet scope contained rules",
                             file_path,
                             line_no + 1,
                             tokens[0]
@@ -384,7 +453,21 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                 }
             }
             t if is_container_close(t) => {
-                // Symmetric to the open form; same passthrough semantics.
+                let lower = t.to_ascii_lowercase();
+                match lower.as_str() {
+                    "</filesmatch>" | "</files>" => match scope_stack.pop() {
+                        Some(_) => {}
+                        None => log::warn!(
+                            "[.htaccess] {}:{}: unmatched '{}'",
+                            file_path,
+                            line_no + 1,
+                            tokens[0]
+                        ),
+                    },
+                    _ => {
+                        // </IfModule>, </Directory>, </If> are no-ops.
+                    }
+                }
             }
             t if is_known_unsupported(t) => {
                 log::debug!(
@@ -420,7 +503,6 @@ fn parse_flags(raw: &str) -> Vec<String> {
 ///   the whole basename, not a substring.
 /// - Brace expansion (`{a,b}`) is NOT supported — those characters
 ///   are escaped to literals.
-#[allow(dead_code)] // wired in T2
 fn glob_to_regex(pat: &str) -> String {
     let mut out = String::from("^(?:");
     for c in pat.chars() {
@@ -674,15 +756,12 @@ mod tests {
             );
             let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
             assert_eq!(cfg.header_rules.len(), 1);
+            // Now that scope_stack is wired, a balanced <FilesMatch> produces
+            // no log output at any level (scope push/pop is silent).
             assert_eq!(
                 count_at_level(log::Level::Warn),
                 0,
                 "<FilesMatch> wrap should produce no warn-level logs; got: {:?}",
-                captured()
-            );
-            assert!(
-                has_log_at_level(log::Level::Debug, "<FilesMatch"),
-                "expected a debug log about <FilesMatch> container; got: {:?}",
                 captured()
             );
         });
@@ -874,5 +953,59 @@ FileETag None
         assert!(re.is_match("a.b"));
         assert!(!re.is_match("axb"));
         assert!(!re.is_match("aXb"));
+    }
+
+    #[test]
+    fn scope_stack_filesmatch_pushes_and_pops() {
+        // Without scoping support in T3, a Header rule inside
+        // <FilesMatch> has no file_scope (T3 wires that). This test
+        // asserts the parser correctly opens and closes scope on a
+        // balanced pair without errors.
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "<FilesMatch \"\\.php$\">\nHeader set X-Foo bar\n</FilesMatch>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.header_rules.len(), 1);
+            // No warn-level logs: balanced FilesMatch is clean.
+            assert_eq!(count_at_level(log::Level::Warn), 0);
+        });
+    }
+
+    #[test]
+    fn unmatched_filesmatch_close_warns() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "</FilesMatch>\n");
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert!(
+                has_log_at_level(log::Level::Warn, "unmatched"),
+                "expected unmatched-close warn; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn malformed_filesmatch_pattern_warns_does_not_crash() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            // `[invalid` is an unclosed character class — regex compile fails.
+            write_htaccess(
+                tmp.path(),
+                "<FilesMatch \"[invalid\">\nHeader set X-After bar\n</FilesMatch>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            // The Header rule after the malformed FilesMatch still parses.
+            assert_eq!(cfg.header_rules.len(), 1);
+            // A warn mentions the malformed pattern.
+            assert!(
+                has_log_at_level(log::Level::Warn, "malformed FilesMatch"),
+                "expected malformed FilesMatch warn; got: {:?}",
+                captured()
+            );
+        });
     }
 }
