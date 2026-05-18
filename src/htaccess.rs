@@ -83,10 +83,60 @@ pub fn parse_htaccess_for_path(root: &Path, dir: &Path) -> Result<HtaccessConfig
         if htaccess_path.exists() {
             let content = std::fs::read_to_string(&htaccess_path)
                 .map_err(|e| format!("Failed to read {:?}: {}", htaccess_path, e))?;
-            apply_htaccess(&mut cfg, &content, &htaccess_path.display().to_string());
+            let joined = join_continuations(&content);
+            apply_htaccess(&mut cfg, &joined, &htaccess_path.display().to_string());
         }
     }
     Ok(cfg)
+}
+
+/// Join `\`-terminated continuation lines before tokenization.
+///
+/// Apache's `.htaccess` permits a line ending in `\` to be joined
+/// with the next line. The trailing backslash is stripped and the
+/// two lines concatenated with a single space.
+///
+/// Comment lines (those whose first non-whitespace character is
+/// `#`) never continue — Apache strips the trailing backslash but
+/// the comment still terminates at the newline.
+fn join_continuations(content: &str) -> String {
+    let mut out = String::new();
+    let mut pending: Option<String> = None;
+    for line in content.lines() {
+        let is_comment = line.trim_start().starts_with('#');
+        if let Some(prev) = pending.take() {
+            // Combine `prev` (already stripped of trailing `\`)
+            // with the current line. The current line's leading
+            // whitespace is removed so continuation indentation
+            // doesn't bleed into the joined value.
+            let combined = format!("{} {}", prev, line.trim_start());
+            if let Some(more) = check_continuation(&combined, false) {
+                pending = Some(more);
+            } else {
+                out.push_str(&combined);
+                out.push('\n');
+            }
+        } else if let Some(stripped) = check_continuation(line, is_comment) {
+            pending = Some(stripped);
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if let Some(prev) = pending {
+        // Trailing unterminated continuation: emit as-is.
+        out.push_str(&prev);
+        out.push('\n');
+    }
+    out
+}
+
+fn check_continuation(line: &str, is_comment: bool) -> Option<String> {
+    if is_comment {
+        return None;
+    }
+    let trimmed = line.trim_end();
+    trimmed.strip_suffix('\\').map(|without_bs| without_bs.trim_end().to_string())
 }
 
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
@@ -331,5 +381,124 @@ mod tests {
         write_htaccess(tmp.path(), "Header set X-Foo bar\n");
         let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
         assert_eq!(cfg.header_rules.len(), 1);
+    }
+
+    use std::sync::{Mutex, OnceLock};
+
+    #[derive(Clone, Debug)]
+    #[allow(dead_code)]
+    struct LogEntry {
+        level: log::Level,
+        msg: String,
+    }
+
+    static LOG_CAPTURE: OnceLock<Mutex<Vec<LogEntry>>> = OnceLock::new();
+    static LOG_INIT: std::sync::Once = std::sync::Once::new();
+    static LOG_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct CaptureLogger;
+
+    impl log::Log for CaptureLogger {
+        fn enabled(&self, _m: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            if let Some(buf) = LOG_CAPTURE.get() {
+                if let Ok(mut v) = buf.lock() {
+                    v.push(LogEntry {
+                        level: record.level(),
+                        msg: record.args().to_string(),
+                    });
+                }
+            }
+        }
+        fn flush(&self) {}
+    }
+
+    static CAPTURE_LOGGER: CaptureLogger = CaptureLogger;
+
+    fn install_log_capture() {
+        LOG_INIT.call_once(|| {
+            let _ = LOG_CAPTURE.set(Mutex::new(Vec::new()));
+            let _ = log::set_logger(&CAPTURE_LOGGER);
+            log::set_max_level(log::LevelFilter::Debug);
+        });
+    }
+
+    fn clear_log() {
+        install_log_capture();
+        if let Some(buf) = LOG_CAPTURE.get() {
+            if let Ok(mut v) = buf.lock() {
+                v.clear();
+            }
+        }
+    }
+
+    fn captured() -> Vec<LogEntry> {
+        LOG_CAPTURE
+            .get()
+            .and_then(|m| m.lock().ok().map(|v| v.clone()))
+            .unwrap_or_default()
+    }
+
+    /// Run `f` with the log-capture buffer cleared, holding the
+    /// capture mutex so concurrent capture-using tests don't race.
+    fn with_log_capture<F: FnOnce()>(f: F) {
+        install_log_capture();
+        let _guard = LOG_TEST_MUTEX.lock().unwrap();
+        clear_log();
+        f();
+    }
+
+    #[allow(dead_code)]
+    fn has_log_at_level(level: log::Level, substring: &str) -> bool {
+        captured()
+            .iter()
+            .any(|e| e.level == level && e.msg.contains(substring))
+    }
+
+    #[allow(dead_code)]
+    fn count_at_level(level: log::Level) -> usize {
+        captured().iter().filter(|e| e.level == level).count()
+    }
+
+    #[test]
+    fn line_continuation_joins_simple_case() {
+        // AddCharset uses backslash continuation in real-world htaccess
+        // files. We don't (yet) implement AddCharset, but the parser
+        // must not emit bogus `unknown directive` warns for the
+        // continuation lines.
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "AddCharset utf-8 .atom \\\n                 .css\n",
+            );
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            // The bogus `.css` token must NOT appear in any log message.
+            for e in captured() {
+                assert!(
+                    !e.msg.contains(".css"),
+                    "continuation should have joined; got bogus token in log: {}",
+                    e.msg
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn line_continuation_does_not_join_comments() {
+        // Comment lines ending in `\` must NOT continue onto the next
+        // line. Apache's parser strips the trailing backslash but the
+        // comment still terminates.
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "# trailing backslash on comment \\\nDirectoryIndex foo.html\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.directory_index, vec!["foo.html"]);
+        });
     }
 }
