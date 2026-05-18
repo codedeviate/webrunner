@@ -39,6 +39,9 @@ pub struct RewriteRule {
     pub substitution: String,
     pub flags: Vec<String>,
     pub conds: Vec<RewriteCond>,
+    /// File-pattern scope from enclosing `<FilesMatch>` / `<Files>`
+    /// containers. Empty = unscoped.
+    pub file_scope: Vec<Regex>,
 }
 
 impl Default for HtaccessConfig {
@@ -369,6 +372,7 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                         substitution: tokens[2].to_string(),
                         flags,
                         conds: std::mem::take(&mut pending_conds),
+                        file_scope: scope_stack.clone(),
                     });
                 }
             }
