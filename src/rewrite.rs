@@ -16,7 +16,26 @@ pub enum RewriteResult {
 /// Apply all Redirect directives and then RewriteRules from the config.
 /// `path` is the request path (no query string). `query` is the query string (may be empty).
 pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteResult {
-    // 1. Redirect directives (prefix match)
+    // 1. RedirectMatch directives (regex match, more specific than prefix).
+    for rule in &cfg.redirect_matches {
+        if let Some(caps) = rule.pattern.captures(path) {
+            let location = rule.to.as_ref().map(|template| {
+                let mut subst = template.clone();
+                for i in 1..caps.len() {
+                    if let Some(m) = caps.get(i) {
+                        subst = subst.replace(&format!("${}", i), m.as_str());
+                    }
+                }
+                subst
+            });
+            return RewriteResult::Redirect {
+                status: rule.status,
+                location,
+            };
+        }
+    }
+
+    // 2. Redirect directives (prefix match)
     for rule in &cfg.redirects {
         if path.starts_with(&rule.from) {
             let location = if path.len() > rule.from.len() {
@@ -211,6 +230,42 @@ mod tests {
         });
         let result = apply_rewrites("/page", "lang=en", &cfg);
         assert!(matches!(result, RewriteResult::Rewrite(ref p) if p == "/index.php?lang=en"));
+    }
+
+    #[test]
+    fn apply_redirectmatch_with_captures() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.redirect_matches.push(crate::htaccess::RedirectMatchRule {
+            status: 301,
+            pattern: regex::Regex::new("^/old/(.*)$").unwrap(),
+            to: Some("/new/$1".to_string()),
+        });
+        let result = apply_rewrites("/old/foo/bar", "", &cfg);
+        match result {
+            RewriteResult::Redirect { status, location } => {
+                assert_eq!(status, 301);
+                assert_eq!(location.as_deref(), Some("/new/foo/bar"));
+            }
+            other => panic!("expected Redirect; got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn apply_redirectmatch_status_204_omits_location() {
+        let mut cfg = HtaccessConfig::default();
+        cfg.redirect_matches.push(crate::htaccess::RedirectMatchRule {
+            status: 204,
+            pattern: regex::Regex::new("/favicon.ico$").unwrap(),
+            to: None,
+        });
+        let result = apply_rewrites("/favicon.ico", "", &cfg);
+        match result {
+            RewriteResult::Redirect { status, location } => {
+                assert_eq!(status, 204);
+                assert!(location.is_none(), "204 should have no Location");
+            }
+            other => panic!("expected Redirect; got {:?}", other),
+        }
     }
 
     #[test]

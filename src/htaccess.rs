@@ -30,14 +30,11 @@ pub struct RedirectRule {
 
 #[derive(Debug, Clone)]
 pub struct RedirectMatchRule {
-    #[allow(dead_code)] // wired in T3
     pub status: u16,
-    #[allow(dead_code)] // wired in T3
     pub pattern: Regex,
     /// Target URL template with `$N` capture substitution. `None`
     /// for status-only forms (204, 4xx) that emit no `Location`
     /// header.
-    #[allow(dead_code)] // wired in T3
     pub to: Option<String>,
 }
 
