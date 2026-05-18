@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-18
+
 ### Added
 
 - `<FilesMatch "regex">` and `<Files "glob">` blocks in `.htaccess`
@@ -37,8 +39,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `<IfModule>` blocks pass through (contents always apply, since
   webrunner implements the module semantics natively).
   `<FilesMatch>`, `<Files>`, `<Directory>`, `<If>` are recognized
-  as containers (contained directives currently apply globally;
-  per-file scoping ships in a follow-up release). Backslash
+  as containers (see Added for the new per-file scoping behavior).
+  Backslash
   line-continuation (`\` at end of line) joins as expected.
   Common Apache directives webrunner doesn't implement (`php_flag`,
   `php_value`, `FileETag`, `RedirectMatch`, `AddEncoding`,
