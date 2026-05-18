@@ -139,6 +139,44 @@ fn check_continuation(line: &str, is_comment: bool) -> Option<String> {
     trimmed.strip_suffix('\\').map(|without_bs| without_bs.trim_end().to_string())
 }
 
+enum ContainerKind {
+    IfModule,
+    FilesMatch,
+    Files,
+    Directory,
+    If,
+}
+
+fn container_open_kind(tok: &str) -> Option<ContainerKind> {
+    let lower = tok.to_ascii_lowercase();
+    // Open tokens look like `<IfModule` (no closing `>` because the
+    // module name is the second token). For the no-arg form
+    // `<IfModule>` we still match — `starts_with` handles both.
+    //
+    // Order matters: `<ifmodule` is checked BEFORE `<if` so plain
+    // `<If` doesn't shadow `<IfModule`.
+    if lower.starts_with("<ifmodule") {
+        Some(ContainerKind::IfModule)
+    } else if lower.starts_with("<filesmatch") {
+        Some(ContainerKind::FilesMatch)
+    } else if lower.starts_with("<files") {
+        Some(ContainerKind::Files)
+    } else if lower.starts_with("<directory") {
+        Some(ContainerKind::Directory)
+    } else if lower.starts_with("<if") {
+        Some(ContainerKind::If)
+    } else {
+        None
+    }
+}
+
+fn is_container_close(tok: &str) -> bool {
+    matches!(
+        tok.to_ascii_lowercase().as_str(),
+        "</ifmodule>" | "</filesmatch>" | "</files>" | "</directory>" | "</if>"
+    )
+}
+
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
     let mut pending_conds: Vec<RewriteCond> = Vec::new();
 
@@ -276,6 +314,32 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                         reason
                     ),
                 }
+            }
+            t if container_open_kind(t).is_some() => {
+                // Safe: just matched.
+                let kind = container_open_kind(t).unwrap();
+                match kind {
+                    ContainerKind::IfModule => {
+                        // True passthrough — webrunner implements the
+                        // semantic equivalents of mod_headers / mod_mime
+                        // / mod_alias / etc. natively, so <IfModule>
+                        // wrapping has no effect.
+                    }
+                    ContainerKind::FilesMatch
+                    | ContainerKind::Files
+                    | ContainerKind::Directory
+                    | ContainerKind::If => {
+                        log::debug!(
+                            "[.htaccess] {}:{}: container '{}' applies globally until per-file scoping ships",
+                            file_path,
+                            line_no + 1,
+                            tokens[0]
+                        );
+                    }
+                }
+            }
+            t if is_container_close(t) => {
+                // Symmetric to the open form; same passthrough semantics.
             }
             _ => {
                 log::warn!("[.htaccess] {}:{}: unknown directive '{}', skipping", file_path, line_no + 1, tokens[0]);
@@ -499,6 +563,51 @@ mod tests {
             );
             let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
             assert_eq!(cfg.directory_index, vec!["foo.html"]);
+        });
+    }
+
+    #[test]
+    fn ifmodule_is_passthrough() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "<IfModule mod_headers.c>\nHeader set X-Foo bar\n</IfModule>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            // Contained Header rule was captured.
+            assert_eq!(cfg.header_rules.len(), 1);
+            // No warn-level logs emitted.
+            assert_eq!(
+                count_at_level(log::Level::Warn),
+                0,
+                "<IfModule> wrap should produce no warn-level logs; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn filesmatch_contained_directive_currently_applies_globally() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "<FilesMatch \"\\.php$\">\nHeader set X-Foo bar\n</FilesMatch>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.header_rules.len(), 1);
+            assert_eq!(
+                count_at_level(log::Level::Warn),
+                0,
+                "<FilesMatch> wrap should produce no warn-level logs; got: {:?}",
+                captured()
+            );
+            assert!(
+                has_log_at_level(log::Level::Debug, "<FilesMatch"),
+                "expected a debug log about <FilesMatch> container; got: {:?}",
+                captured()
+            );
         });
     }
 }
