@@ -211,9 +211,13 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             continue;
         }
 
-        let tokens: Vec<&str> = line.splitn(10, char::is_whitespace)
-            .filter(|s| !s.is_empty())
-            .collect();
+        // Use `split_whitespace` so runs of whitespace collapse into
+        // a single separator. The earlier `splitn(10, char::is_whitespace)`
+        // form split on each individual whitespace char, which broke
+        // tokens like `AddType ... <many spaces> ... json` — the
+        // 10-split cap was exhausted inside the whitespace run, leaving
+        // a junk token with leading whitespace.
+        let tokens: Vec<&str> = line.split_whitespace().collect();
 
         if tokens.is_empty() {
             continue;
