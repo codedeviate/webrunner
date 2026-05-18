@@ -10,7 +10,6 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, EXPIRES};
 use axum::http::{HeaderValue, Response};
 use std::time::{Duration, SystemTime};
 
-#[allow(dead_code)] // fields used in T2/T4
 #[derive(Debug, Clone, Default)]
 pub struct ExpiresConfig {
     pub active: bool,
@@ -27,7 +26,6 @@ pub struct ExpiresConfig {
 /// Returns `Err(reason)` on malformed input (unknown base, missing
 /// 'plus', non-numeric duration, unknown unit, or multi-component
 /// specs which are deferred).
-#[allow(dead_code)] // called from htaccess.rs in T3
 pub fn parse_expires_spec(spec: &str) -> Result<u64, String> {
     let mut iter = spec.split_whitespace();
     let base = iter.next().ok_or_else(|| "empty spec".to_string())?;
