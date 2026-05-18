@@ -31,12 +31,14 @@ entry rather than leaving a crossed-out line here.
 
 ### `.htaccess` directives
 
-- `ExpiresActive` / `ExpiresByType` / `ExpiresDefault` (mod_expires).
 - `Allow` / `Deny` / `Require ip` for IP-based access control.
 - `Require user <name>` and `Require group` (currently only `valid-user`).
 - `AuthDigest` for digest auth.
 - `RewriteBase`, `RewriteMap`.
 - More `RewriteRule` flags: `[F]`, `[G]`, `[NC]`, `[P]`, `[E]`.
+  `[E=VAR:value]` depends on the env-var system (see `SetEnv` /
+  `SetEnvIf` under Deferred). `[P]` is reverse-proxy territory and
+  conflicts with the Out-of-scope policy.
 
 ### CGI
 
@@ -73,9 +75,11 @@ entry rather than leaving a crossed-out line here.
   (`%{NAME}i`, `%{NAME}o`). Small extension to the placeholder
   resolver in `header_directive.rs`. Subproject #3 of the
   full-mod_headers roadmap.
-- **`SetEnv` / `SetEnvIf` directives + env-var placeholders
-  (`%{NAME}e`) + `env=VAR` Header condition.** Requires a
-  per-request env-var bag. Subproject #4.
+- **`SetEnv` / `SetEnvIf` / `SetEnvIfNoCase` directives + env-var
+  placeholders (`%{NAME}e`) + `env=VAR` Header condition + `[E]`
+  rewrite flag.** Requires a per-request env-var bag. Subproject
+  #4 of the full-mod_headers roadmap; also unblocks the `[E]`
+  rewrite flag and the `RequestHeader` directive.
 - **`expr=` conditions on Header rules.** Apache `ap_expr` subset.
   Requires an expression evaluator. Subproject #5.
 - **SSL placeholders (`%{NAME}s`).** Surface rustls connection
@@ -95,11 +99,9 @@ entry rather than leaving a crossed-out line here.
   max-age=...` + `Expires:` headers. Sub-project D.
 - **`<If "expression">` evaluator** — needs the mod_headers
   subproject #5 (`expr=`) evaluator first.
-- **`SetEnv` / `SetEnvIf` / `SetEnvIfNoCase` directives** — needs
-  the env-var system (mod_headers subproject #4).
 - **`RequestHeader` directive** — modifies request headers (different
   from `Header` which modifies responses). Adjacent to mod_headers
-  subproject #4.
+  subproject #4 (env-var system) but works on the request side.
 
 ## Not yet supported
 
