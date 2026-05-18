@@ -714,4 +714,103 @@ mod tests {
             "extension should be stripped of trailing semicolon"
         );
     }
+
+    #[test]
+    fn parser_robustness_real_world_fixture() {
+        let fixture = r#"
+# General Apache settings
+Options SymLinksIfOwnerMatch
+DirectorySlash Off
+RewriteEngine On
+
+<FilesMatch "\.php$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-cache"
+    </IfModule>
+</FilesMatch>
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.+)\.(\d+)\.(js|css)$ $1.$3 [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule . index.php [QSA,L]
+
+php_flag    display_errors          off
+php_value   max_input_vars          16384
+
+<IfModule mod_headers.c>
+    Header set X-UA-Compatible "IE=edge"
+    Header set X-Content-Type-Options "nosniff"
+    Header setifempty X-FRAME-OPTIONS "deny"
+</IfModule>
+
+<IfModule mod_mime.c>
+    AddType application/json                            json map topojson
+    AddType application/vnd.ms-excel                    xls;
+    AddType application/vnd.oasis.opendocument.spreadsheet  ods;
+    AddCharset utf-8 .atom \
+                     .css \
+                     .js
+</IfModule>
+
+AddDefaultCharset utf-8
+
+<IfModule mod_alias.c>
+    RedirectMatch 204 /favicon.ico$
+</IfModule>
+
+<IfModule mod_expires.c>
+    ExpiresActive on
+    ExpiresDefault "access plus 1 month"
+    ExpiresByType text/css "access plus 1 year"
+</IfModule>
+
+FileETag None
+"#;
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            std::fs::write(tmp.path().join(".htaccess"), fixture).unwrap();
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+
+            // Supported directives all parsed.
+            assert!(cfg.rewrite_engine, "RewriteEngine On");
+            assert_eq!(
+                cfg.rewrite_rules.len(),
+                2,
+                "expected 2 RewriteRules; got {:?}",
+                cfg.rewrite_rules
+            );
+            // 4 Header rules: Cache-Control (inside FilesMatch — applies globally for now),
+            // X-UA-Compatible, X-Content-Type-Options, X-FRAME-OPTIONS.
+            assert_eq!(
+                cfg.header_rules.len(),
+                4,
+                "expected 4 Header rules; got {}",
+                cfg.header_rules.len()
+            );
+            // AddType including the `xls;` typo case.
+            assert!(
+                cfg.add_types.iter().any(|(e, _)| e == "xls"),
+                "AddType xls; should strip to 'xls'"
+            );
+            assert!(
+                cfg.add_types.iter().any(|(e, _)| e == "json"),
+                "AddType json present"
+            );
+            assert_eq!(cfg.add_default_charset.as_deref(), Some("utf-8"));
+
+            // The critical assertion: ZERO warn-level entries.
+            let warns: Vec<_> = captured()
+                .into_iter()
+                .filter(|e| e.level == log::Level::Warn)
+                .collect();
+            assert!(
+                warns.is_empty(),
+                "expected zero warn-level logs; got {} warns: {:?}",
+                warns.len(),
+                warns,
+            );
+        });
+    }
 }
