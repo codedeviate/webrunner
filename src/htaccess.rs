@@ -1117,4 +1117,38 @@ FileETag None
         assert_eq!(scope.auth_name.as_deref(), Some("PHP Only"));
         assert_eq!(scope.file_scope.len(), 1);
     }
+
+    #[test]
+    fn filesmatch_real_world_user_htaccess_subset() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<FilesMatch \"\\.php$\">\n  Header set Cache-Control \"no-cache\"\n</FilesMatch>\nHeader set X-Always yes\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.header_rules.len(), 2);
+
+        // The first rule is inside <FilesMatch>: file_scope has 1 entry.
+        let r0 = &cfg.header_rules[0];
+        assert_eq!(r0.file_scope.len(), 1, "first rule should be scoped");
+
+        // The second rule is outside: file_scope is empty.
+        let r1 = &cfg.header_rules[1];
+        assert_eq!(r1.file_scope.len(), 0, "second rule should be unscoped");
+    }
+
+    #[test]
+    fn files_glob_simple() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<Files \"*.css\">\nHeader set X-Css 1\n</Files>\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.header_rules.len(), 1);
+        let scope = &cfg.header_rules[0].file_scope;
+        assert_eq!(scope.len(), 1);
+        assert!(scope[0].is_match("style.css"));
+        assert!(!scope[0].is_match("style.js"));
+    }
 }
