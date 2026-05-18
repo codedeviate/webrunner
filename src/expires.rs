@@ -69,7 +69,6 @@ pub fn parse_expires_spec(spec: &str) -> Result<u64, String> {
 /// Called from `handle_request` BEFORE `header_directive::apply_rules`
 /// so user-specified `Header set Cache-Control` overrides our value
 /// (Apache semantics).
-#[allow(dead_code)] // wired into handle_request in T4
 pub fn apply_expires(response: &mut Response<Body>, cfg: &ExpiresConfig) {
     if !cfg.active {
         return;

@@ -190,6 +190,8 @@ pub async fn handle_request(
         }
     }
 
+    crate::expires::apply_expires(&mut response, &htaccess.expires);
+
     let protocol = format!("{:?}", parts.version);
     let header_ctx = crate::header_directive::RequestContext {
         method: &parts.method,
