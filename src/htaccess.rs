@@ -177,6 +177,31 @@ fn is_container_close(tok: &str) -> bool {
     )
 }
 
+/// Standard Apache directives that webrunner doesn't implement but
+/// commonly appear in real-world `.htaccess` files. Demoting these
+/// from `warn` to `debug` keeps the default log clean; users can
+/// pass `--log-level debug` to see what was skipped.
+fn is_known_unsupported(tok: &str) -> bool {
+    matches!(
+        tok.to_ascii_lowercase().as_str(),
+        "directoryslash"
+            | "php_flag"
+            | "php_value"
+            | "fileetag"
+            | "redirectmatch"
+            | "addencoding"
+            | "addcharset"
+            | "addoutputfilterbytype"
+            | "setenv"
+            | "setenvif"
+            | "setenvifnocase"
+            | "requestheader"
+            | "expiresactive"
+            | "expiresdefault"
+            | "expiresbytype"
+    )
+}
+
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
     let mut pending_conds: Vec<RewriteCond> = Vec::new();
 
@@ -340,6 +365,14 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             }
             t if is_container_close(t) => {
                 // Symmetric to the open form; same passthrough semantics.
+            }
+            t if is_known_unsupported(t) => {
+                log::debug!(
+                    "[.htaccess] {}:{}: directive '{}' is recognized but not yet implemented in webrunner",
+                    file_path,
+                    line_no + 1,
+                    tokens[0]
+                );
             }
             _ => {
                 log::warn!("[.htaccess] {}:{}: unknown directive '{}', skipping", file_path, line_no + 1, tokens[0]);
@@ -602,6 +635,40 @@ mod tests {
             assert!(
                 has_log_at_level(log::Level::Debug, "<FilesMatch"),
                 "expected a debug log about <FilesMatch> container; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn recognized_unsupported_directive_no_warn() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "php_flag display_errors off\n");
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(
+                count_at_level(log::Level::Warn),
+                0,
+                "php_flag should produce no warn-level log; got: {:?}",
+                captured()
+            );
+            assert!(
+                has_log_at_level(log::Level::Debug, "php_flag"),
+                "expected debug log for php_flag; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn unknown_directive_still_warns() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "TotallyMadeUpDirective foo\n");
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert!(
+                has_log_at_level(log::Level::Warn, "TotallyMadeUpDirective"),
+                "genuinely unknown directive should still warn; got: {:?}",
                 captured()
             );
         });
