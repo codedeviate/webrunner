@@ -136,9 +136,10 @@ pub async fn handle_request(
         }
     };
 
-    // Compute the resolved file's basename for scope-aware lookups.
-    // For directory listings, 404s, and rewrites that left no file
-    // resolved, fall back to the last URL-path segment.
+    // Compute the basename used for scope matching. Uses the ORIGINAL
+    // request URL (path_str), so post-rewrite paths are NOT visible
+    // here. For directory listings, 404s, and other paths with an
+    // empty URL leaf, fall back to the resolved fs_path's leaf.
     let filename: String = {
         let url_basename = path_str.rsplit('/').next().unwrap_or("");
         if url_basename.is_empty() {
@@ -156,6 +157,21 @@ pub async fn handle_request(
     // Scope-aware auth check. Runs AFTER serve_path so the file is
     // resolved; the LAST matching AuthScope (or the flat fields)
     // applies.
+    //
+    // Note on Apache divergence: Apache evaluates auth before the
+    // filesystem handler reads the file body. webrunner runs the
+    // handler first and the auth check overwrites the response on
+    // failure — observable behaviour matches Apache (a failed auth
+    // returns 401, never reveals 404/file bytes), but internally
+    // there's a wasted read on auth-fail paths. Acceptable for a
+    // dev server.
+    //
+    // Note on filename source: the basename used for scope matching
+    // comes from the ORIGINAL request URL, not the post-rewrite
+    // path. For rewrites that preserve the extension (the common
+    // case) this is identical; for rewrites that change the
+    // extension, scope matches against what the user requested,
+    // not what was served.
     let auth = resolve_auth_scope(&htaccess, &filename);
     if auth.auth_required {
         if let Some(user_file) = &auth.auth_user_file {
