@@ -19,6 +19,7 @@ pub struct HtaccessConfig {
     pub rewrite_engine: bool,
     pub rewrite_rules: Vec<RewriteRule>,
     pub header_rules: Vec<crate::header_directive::HeaderRule>,
+    pub expires: crate::expires::ExpiresConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,7 @@ impl Default for HtaccessConfig {
             rewrite_engine: false,
             rewrite_rules: Vec::new(),
             header_rules: Vec::new(),
+            expires: crate::expires::ExpiresConfig::default(),
         }
     }
 }
@@ -228,9 +230,6 @@ fn is_known_unsupported(tok: &str) -> bool {
             | "setenvif"
             | "setenvifnocase"
             | "requestheader"
-            | "expiresactive"
-            | "expiresdefault"
-            | "expiresbytype"
     )
 }
 
@@ -408,6 +407,53 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                     cfg.add_default_charset = Some(tokens[1].to_string());
                 }
             }
+
+            "expiresactive" => {
+                cfg.expires.active = tokens
+                    .get(1)
+                    .map(|s| s.eq_ignore_ascii_case("on"))
+                    .unwrap_or(false);
+            }
+
+            "expiresdefault" => {
+                let raw = tokens[1..].join(" ");
+                let spec = raw.trim_matches('"');
+                match crate::expires::parse_expires_spec(spec) {
+                    Ok(secs) => cfg.expires.default = Some(secs),
+                    Err(e) => log::warn!(
+                        "[.htaccess] {}:{}: malformed ExpiresDefault '{}': {}",
+                        file_path,
+                        line_no + 1,
+                        spec,
+                        e
+                    ),
+                }
+            }
+
+            "expiresbytype" => {
+                if tokens.len() < 3 {
+                    log::warn!(
+                        "[.htaccess] {}:{}: malformed ExpiresByType: too few arguments",
+                        file_path,
+                        line_no + 1
+                    );
+                    continue;
+                }
+                let mime = tokens[1].to_string();
+                let raw = tokens[2..].join(" ");
+                let spec = raw.trim_matches('"');
+                match crate::expires::parse_expires_spec(spec) {
+                    Ok(secs) => cfg.expires.by_type.push((mime, secs)),
+                    Err(e) => log::warn!(
+                        "[.htaccess] {}:{}: malformed ExpiresByType '{}': {}",
+                        file_path,
+                        line_no + 1,
+                        spec,
+                        e
+                    ),
+                }
+            }
+
             "redirect" => {
                 // Redirect [status] from to
                 let (status, from, to) = if tokens.len() >= 4 {
@@ -1290,5 +1336,23 @@ FileETag None
                 captured()
             );
         });
+    }
+
+    #[test]
+    fn expires_directives_parsed_end_to_end() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            r#"ExpiresActive on
+ExpiresDefault "access plus 1 month"
+ExpiresByType text/css "access plus 1 year"
+"#,
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert!(cfg.expires.active);
+        assert_eq!(cfg.expires.default, Some(2_592_000));
+        assert_eq!(cfg.expires.by_type.len(), 1);
+        assert_eq!(cfg.expires.by_type[0].0, "text/css");
+        assert_eq!(cfg.expires.by_type[0].1, 31_536_000);
     }
 }
