@@ -10,6 +10,7 @@ pub struct HtaccessConfig {
     pub auth_required: bool,
     pub auth_name: Option<String>,
     pub auth_user_file: Option<String>,
+    pub auth_scopes: Vec<AuthScope>,
     pub error_documents: HashMap<u16, String>,
     pub add_types: Vec<AddTypeEntry>,
     pub add_default_charset: Option<String>,
@@ -51,6 +52,14 @@ pub struct AddTypeEntry {
     pub mime: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AuthScope {
+    pub file_scope: Vec<Regex>,
+    pub auth_required: bool,
+    pub auth_name: Option<String>,
+    pub auth_user_file: Option<String>,
+}
+
 impl Default for HtaccessConfig {
     fn default() -> Self {
         Self {
@@ -59,6 +68,7 @@ impl Default for HtaccessConfig {
             auth_required: false,
             auth_name: None,
             auth_user_file: None,
+            auth_scopes: Vec::new(),
             error_documents: HashMap::new(),
             add_types: Vec::new(),
             add_default_charset: None,
@@ -241,6 +251,39 @@ fn extract_container_pattern(tokens: &[&str]) -> Option<String> {
     }
 }
 
+/// Returns a mutable reference to the `AuthScope` whose `file_scope`
+/// matches the given `current` scope stack (by regex source-string
+/// equality), pushing a new one if no match exists.
+///
+/// Source-string equality is used because `Regex` itself isn't `Eq`,
+/// and source-string equality correctly groups together auth
+/// directives that appear inside the same `<FilesMatch>` block (they
+/// share the same scope_stack snapshot at that point).
+fn ensure_auth_scope<'a>(
+    scopes: &'a mut Vec<AuthScope>,
+    current: &[Regex],
+) -> &'a mut AuthScope {
+    let existing_idx = scopes.iter().position(|s| {
+        s.file_scope.len() == current.len()
+            && s.file_scope
+                .iter()
+                .zip(current.iter())
+                .all(|(a, b)| a.as_str() == b.as_str())
+    });
+    match existing_idx {
+        Some(i) => &mut scopes[i],
+        None => {
+            scopes.push(AuthScope {
+                file_scope: current.to_vec(),
+                auth_required: false,
+                auth_name: None,
+                auth_user_file: None,
+            });
+            scopes.last_mut().unwrap()
+        }
+    }
+}
+
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
     let mut pending_conds: Vec<RewriteCond> = Vec::new();
     let mut scope_stack: Vec<Regex> = Vec::new();
@@ -284,17 +327,30 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             "authname" => {
                 if tokens.len() > 1 {
                     let name = tokens[1..].join(" ").trim_matches('"').to_string();
-                    cfg.auth_name = Some(name);
+                    if scope_stack.is_empty() {
+                        cfg.auth_name = Some(name);
+                    } else {
+                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_name = Some(name);
+                    }
                 }
             }
             "authuserfile" => {
                 if tokens.len() > 1 {
-                    cfg.auth_user_file = Some(tokens[1].to_string());
+                    let path = tokens[1].to_string();
+                    if scope_stack.is_empty() {
+                        cfg.auth_user_file = Some(path);
+                    } else {
+                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_user_file = Some(path);
+                    }
                 }
             }
             "require" => {
                 if tokens.get(1).map(|s| s.to_ascii_lowercase()) == Some("valid-user".to_string()) {
-                    cfg.auth_required = true;
+                    if scope_stack.is_empty() {
+                        cfg.auth_required = true;
+                    } else {
+                        ensure_auth_scope(&mut cfg.auth_scopes, &scope_stack).auth_required = true;
+                    }
                 }
             }
             "errordocument" => {
@@ -1040,5 +1096,25 @@ FileETag None
                 captured()
             );
         });
+    }
+
+    #[test]
+    fn auth_directives_inside_filesmatch_populate_auth_scopes() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "<FilesMatch \"\\.php$\">\nAuthType Basic\nAuthName \"PHP Only\"\nAuthUserFile /tmp/x\nRequire valid-user\n</FilesMatch>\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        // No flat (unscoped) auth.
+        assert!(!cfg.auth_required, "flat auth_required should be false");
+        assert!(cfg.auth_user_file.is_none(), "flat auth_user_file should be None");
+        // One scoped entry.
+        assert_eq!(cfg.auth_scopes.len(), 1);
+        let scope = &cfg.auth_scopes[0];
+        assert!(scope.auth_required);
+        assert_eq!(scope.auth_user_file.as_deref(), Some("/tmp/x"));
+        assert_eq!(scope.auth_name.as_deref(), Some("PHP Only"));
+        assert_eq!(scope.file_scope.len(), 1);
     }
 }
