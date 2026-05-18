@@ -93,9 +93,9 @@ entry rather than leaving a crossed-out line here.
   ever becomes useful (e.g., for nested per-directory `.htaccess`
   merge override behaviour), it builds on sub-project B's scope
   stack.
-- **`mod_expires`** (`ExpiresActive`, `ExpiresDefault`,
-  `ExpiresByType "access plus N <units>"`) emitting `Cache-Control:
-  max-age=...` + `Expires:` headers. Sub-project D.
+- **`modification` base, legacy `A<N>`/`M<N>` short form, and
+  multi-component specs** for mod_expires directives. The basic
+  `[access|now] plus N <unit>` form is supported.
 - **`<If "expression">` evaluator** — needs the mod_headers
   subproject #5 (`expr=`) evaluator first.
 - **`RequestHeader` directive** — modifies request headers (different

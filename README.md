@@ -23,6 +23,10 @@ Built for local development and quick prototyping. Not a production server.
   - `RedirectMatch` (regex-based redirect with `$N` capture
     substitution; supports status-only forms like
     `RedirectMatch 204 /favicon.ico$`)
+  - `ExpiresActive`, `ExpiresDefault`, `ExpiresByType` (mod_expires
+    subset: emits `Cache-Control: max-age=N` and `Expires` headers
+    based on response Content-Type; supports `access plus N <unit>`
+    time-spec)
   - `RewriteEngine`, `RewriteRule`, `RewriteCond` (incl. `[QSA]`, `[L]`, `[R]`)
   - `AuthType Basic` with `.htpasswd` (bcrypt, SHA-1, Apache MD5)
   - `Header set/add/unset/append/merge/setifempty/echo/edit/edit*`
@@ -365,9 +369,12 @@ The crate is organised by concern:
   directives webrunner does not implement (`php_flag`, `php_value`,
   `FileETag`, `AddEncoding`, `AddCharset`,
   `AddOutputFilterByType`, `SetEnv`, `SetEnvIf`, `SetEnvIfNoCase`,
-  `RequestHeader`, `ExpiresActive`, `ExpiresDefault`, `ExpiresByType`,
-  `DirectorySlash`) are silently skipped — pass `--log-level debug`
-  to see what was skipped.
+  `RequestHeader`, `DirectorySlash`) are silently skipped — pass
+  `--log-level debug` to see what was skipped.
+- mod_expires supports only the `access` / `now` base and
+  single-component specs (`access plus 1 year`). `modification`
+  base, legacy short form (`A3600`/`M86400`), and multi-component
+  specs (`access plus 1 year 6 months`) are not yet implemented.
 
 ## License
 

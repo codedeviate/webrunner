@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   for codes that omit `Location` (204, 410, and 4xx in general)
   — useful for silencing favicon-404 spam with
   `RedirectMatch 204 /favicon.ico$`.
+- `ExpiresActive`, `ExpiresDefault`, `ExpiresByType` directives
+  in `.htaccess` (mod_expires subset). Emits `Cache-Control:
+  max-age=N` and `Expires: <http-date>` based on the response's
+  Content-Type. Time-spec grammar is `[access|now] plus N <unit>`
+  with units from `second` through `year` (Apache conventions:
+  month = 30 days, year = 365 days). `Header set Cache-Control`
+  in the same `.htaccess` overrides the mod_expires value
+  (Apache semantics). `modification` base, legacy `A<N>`/`M<N>`
+  short form, and multi-component specs remain deferred.
 
 ### Changed
 
