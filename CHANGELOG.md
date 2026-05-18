@@ -12,6 +12,29 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- `.htaccess` parser is now silent on real-world Apache files.
+  `<IfModule>` blocks pass through (contents always apply, since
+  webrunner implements the module semantics natively).
+  `<FilesMatch>`, `<Files>`, `<Directory>`, `<If>` are recognized
+  as containers (contained directives currently apply globally;
+  per-file scoping ships in a follow-up release). Backslash
+  line-continuation (`\` at end of line) joins as expected.
+  Common Apache directives webrunner doesn't implement (`php_flag`,
+  `php_value`, `FileETag`, `RedirectMatch`, `AddEncoding`,
+  `AddCharset`, `AddOutputFilterByType`, `SetEnv`, `SetEnvIf`,
+  `SetEnvIfNoCase`, `RequestHeader`, `ExpiresActive`,
+  `ExpiresDefault`, `ExpiresByType`, `DirectorySlash`) are now
+  silently skipped at the default `info` log level (visible with
+  `--log-level debug`). `AddType` extensions with stray trailing
+  semicolons (`xls;`) are now stripped instead of stored literally
+  — previously the typo silently broke the MIME mapping for files
+  with that extension. The line tokenizer now collapses runs of
+  whitespace into a single separator, fixing an existing bug where
+  multi-space indentation in directives like `AddType` produced
+  junk extension tokens with leading whitespace.
+
 ## [0.6.0] - 2026-05-17
 
 ### Added

@@ -83,10 +83,123 @@ pub fn parse_htaccess_for_path(root: &Path, dir: &Path) -> Result<HtaccessConfig
         if htaccess_path.exists() {
             let content = std::fs::read_to_string(&htaccess_path)
                 .map_err(|e| format!("Failed to read {:?}: {}", htaccess_path, e))?;
-            apply_htaccess(&mut cfg, &content, &htaccess_path.display().to_string());
+            let joined = join_continuations(&content);
+            apply_htaccess(&mut cfg, &joined, &htaccess_path.display().to_string());
         }
     }
     Ok(cfg)
+}
+
+/// Join `\`-terminated continuation lines before tokenization.
+///
+/// Apache's `.htaccess` permits a line ending in `\` to be joined
+/// with the next line. The trailing backslash is stripped and the
+/// two lines concatenated with a single space.
+///
+/// Comment lines (those whose first non-whitespace character is
+/// `#`) never continue — Apache strips the trailing backslash but
+/// the comment still terminates at the newline.
+fn join_continuations(content: &str) -> String {
+    let mut out = String::new();
+    let mut pending: Option<String> = None;
+    for line in content.lines() {
+        let is_comment = line.trim_start().starts_with('#');
+        if let Some(prev) = pending.take() {
+            // Combine `prev` (already stripped of trailing `\`)
+            // with the current line. The current line's leading
+            // whitespace is removed so continuation indentation
+            // doesn't bleed into the joined value.
+            let combined = format!("{} {}", prev, line.trim_start());
+            if let Some(more) = check_continuation(&combined, false) {
+                pending = Some(more);
+            } else {
+                out.push_str(&combined);
+                out.push('\n');
+            }
+        } else if let Some(stripped) = check_continuation(line, is_comment) {
+            pending = Some(stripped);
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if let Some(prev) = pending {
+        // Trailing unterminated continuation: emit as-is.
+        out.push_str(&prev);
+        out.push('\n');
+    }
+    out
+}
+
+fn check_continuation(line: &str, is_comment: bool) -> Option<String> {
+    if is_comment {
+        return None;
+    }
+    let trimmed = line.trim_end();
+    trimmed.strip_suffix('\\').map(|without_bs| without_bs.trim_end().to_string())
+}
+
+enum ContainerKind {
+    IfModule,
+    FilesMatch,
+    Files,
+    Directory,
+    If,
+}
+
+fn container_open_kind(tok: &str) -> Option<ContainerKind> {
+    let lower = tok.to_ascii_lowercase();
+    // Open tokens look like `<IfModule` (no closing `>` because the
+    // module name is the second token). For the no-arg form
+    // `<IfModule>` we still match — `starts_with` handles both.
+    //
+    // Order matters: `<ifmodule` is checked BEFORE `<if` so plain
+    // `<If` doesn't shadow `<IfModule`.
+    if lower.starts_with("<ifmodule") {
+        Some(ContainerKind::IfModule)
+    } else if lower.starts_with("<filesmatch") {
+        Some(ContainerKind::FilesMatch)
+    } else if lower.starts_with("<files") {
+        Some(ContainerKind::Files)
+    } else if lower.starts_with("<directory") {
+        Some(ContainerKind::Directory)
+    } else if lower.starts_with("<if") {
+        Some(ContainerKind::If)
+    } else {
+        None
+    }
+}
+
+fn is_container_close(tok: &str) -> bool {
+    matches!(
+        tok.to_ascii_lowercase().as_str(),
+        "</ifmodule>" | "</filesmatch>" | "</files>" | "</directory>" | "</if>"
+    )
+}
+
+/// Standard Apache directives that webrunner doesn't implement but
+/// commonly appear in real-world `.htaccess` files. Demoting these
+/// from `warn` to `debug` keeps the default log clean; users can
+/// pass `--log-level debug` to see what was skipped.
+fn is_known_unsupported(tok: &str) -> bool {
+    matches!(
+        tok.to_ascii_lowercase().as_str(),
+        "directoryslash"
+            | "php_flag"
+            | "php_value"
+            | "fileetag"
+            | "redirectmatch"
+            | "addencoding"
+            | "addcharset"
+            | "addoutputfilterbytype"
+            | "setenv"
+            | "setenvif"
+            | "setenvifnocase"
+            | "requestheader"
+            | "expiresactive"
+            | "expiresdefault"
+            | "expiresbytype"
+    )
 }
 
 fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
@@ -98,9 +211,13 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             continue;
         }
 
-        let tokens: Vec<&str> = line.splitn(10, char::is_whitespace)
-            .filter(|s| !s.is_empty())
-            .collect();
+        // Use `split_whitespace` so runs of whitespace collapse into
+        // a single separator. The earlier `splitn(10, char::is_whitespace)`
+        // form split on each individual whitespace char, which broke
+        // tokens like `AddType ... <many spaces> ... json` — the
+        // 10-split cap was exhausted inside the whitespace run, leaving
+        // a junk token with leading whitespace.
+        let tokens: Vec<&str> = line.split_whitespace().collect();
 
         if tokens.is_empty() {
             continue;
@@ -152,9 +269,25 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
             "addtype" => {
                 if tokens.len() >= 3 {
                     let mime = tokens[1].to_string();
-                    // extensions may have leading dot: .foo → foo
                     for ext_raw in &tokens[2..] {
-                        let ext = ext_raw.trim_start_matches('.').to_ascii_lowercase();
+                        // Strip trailing semicolons (some real-world
+                        // htaccess files mistakenly add them); then
+                        // strip a leading dot.
+                        let ext = ext_raw
+                            .trim_end_matches(';')
+                            .trim_start_matches('.')
+                            .to_ascii_lowercase();
+                        if ext.is_empty() {
+                            continue;
+                        }
+                        if ext_raw.ends_with(';') {
+                            log::debug!(
+                                "[.htaccess] {}:{}: stripped trailing ';' from AddType extension '{}'",
+                                file_path,
+                                line_no + 1,
+                                ext_raw,
+                            );
+                        }
                         cfg.add_types.push((ext, mime.clone()));
                     }
                 }
@@ -226,6 +359,40 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                         reason
                     ),
                 }
+            }
+            t if container_open_kind(t).is_some() => {
+                // Safe: just matched.
+                let kind = container_open_kind(t).unwrap();
+                match kind {
+                    ContainerKind::IfModule => {
+                        // True passthrough — webrunner implements the
+                        // semantic equivalents of mod_headers / mod_mime
+                        // / mod_alias / etc. natively, so <IfModule>
+                        // wrapping has no effect.
+                    }
+                    ContainerKind::FilesMatch
+                    | ContainerKind::Files
+                    | ContainerKind::Directory
+                    | ContainerKind::If => {
+                        log::debug!(
+                            "[.htaccess] {}:{}: container '{}' applies globally until per-file scoping ships",
+                            file_path,
+                            line_no + 1,
+                            tokens[0]
+                        );
+                    }
+                }
+            }
+            t if is_container_close(t) => {
+                // Symmetric to the open form; same passthrough semantics.
+            }
+            t if is_known_unsupported(t) => {
+                log::debug!(
+                    "[.htaccess] {}:{}: directive '{}' is recognized but not yet implemented in webrunner",
+                    file_path,
+                    line_no + 1,
+                    tokens[0]
+                );
             }
             _ => {
                 log::warn!("[.htaccess] {}:{}: unknown directive '{}', skipping", file_path, line_no + 1, tokens[0]);
@@ -331,5 +498,323 @@ mod tests {
         write_htaccess(tmp.path(), "Header set X-Foo bar\n");
         let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
         assert_eq!(cfg.header_rules.len(), 1);
+    }
+
+    use std::cell::RefCell;
+    use std::sync::Once;
+
+    #[derive(Clone, Debug)]
+    struct LogEntry {
+        level: log::Level,
+        msg: String,
+    }
+
+    thread_local! {
+        /// Per-thread log capture buffer. `Some(Vec)` when a capture-
+        /// using test is active on this thread; `None` otherwise.
+        /// Messages from threads with no active capture are dropped
+        /// by the logger, preventing cross-test bleed-through.
+        static CAPTURE: RefCell<Option<Vec<LogEntry>>> = const { RefCell::new(None) };
+    }
+
+    static LOG_INIT: Once = Once::new();
+
+    struct CaptureLogger;
+
+    impl log::Log for CaptureLogger {
+        fn enabled(&self, _m: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            CAPTURE.with(|cell| {
+                if let Some(buf) = cell.borrow_mut().as_mut() {
+                    buf.push(LogEntry {
+                        level: record.level(),
+                        msg: record.args().to_string(),
+                    });
+                }
+            });
+        }
+        fn flush(&self) {}
+    }
+
+    static CAPTURE_LOGGER: CaptureLogger = CaptureLogger;
+
+    fn install_log_capture() {
+        LOG_INIT.call_once(|| {
+            let _ = log::set_logger(&CAPTURE_LOGGER);
+            log::set_max_level(log::LevelFilter::Debug);
+        });
+    }
+
+    /// Run `f` with a fresh per-thread log capture. The capture is
+    /// thread-local, so multiple capture-using tests run in parallel
+    /// without serialization and without cross-thread bleed-through.
+    /// On panic in `f`, the unwind propagates after the capture is
+    /// reset on the next call (no poisoning is possible because no
+    /// mutex is held).
+    fn with_log_capture<F: FnOnce()>(f: F) {
+        install_log_capture();
+        CAPTURE.with(|cell| cell.replace(Some(Vec::new())));
+        f();
+    }
+
+    fn captured() -> Vec<LogEntry> {
+        CAPTURE.with(|cell| cell.borrow().clone().unwrap_or_default())
+    }
+
+    #[allow(dead_code)]
+    fn has_log_at_level(level: log::Level, substring: &str) -> bool {
+        captured()
+            .iter()
+            .any(|e| e.level == level && e.msg.contains(substring))
+    }
+
+    #[allow(dead_code)]
+    fn count_at_level(level: log::Level) -> usize {
+        captured().iter().filter(|e| e.level == level).count()
+    }
+
+    #[test]
+    fn line_continuation_joins_simple_case() {
+        // AddCharset uses backslash continuation in real-world htaccess
+        // files. We don't (yet) implement AddCharset, but the parser
+        // must not emit bogus `unknown directive` warns for the
+        // continuation lines.
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "AddCharset utf-8 .atom \\\n                 .css\n",
+            );
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            // The bogus `.css` token must NOT appear in any log message.
+            for e in captured() {
+                assert!(
+                    !e.msg.contains(".css"),
+                    "continuation should have joined; got bogus token in log: {}",
+                    e.msg
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn line_continuation_does_not_join_comments() {
+        // Comment lines ending in `\` must NOT continue onto the next
+        // line. Apache's parser strips the trailing backslash but the
+        // comment still terminates.
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "# trailing backslash on comment \\\nDirectoryIndex foo.html\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.directory_index, vec!["foo.html"]);
+        });
+    }
+
+    #[test]
+    fn ifmodule_is_passthrough() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "<IfModule mod_headers.c>\nHeader set X-Foo bar\n</IfModule>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            // Contained Header rule was captured.
+            assert_eq!(cfg.header_rules.len(), 1);
+            // No warn-level logs emitted.
+            assert_eq!(
+                count_at_level(log::Level::Warn),
+                0,
+                "<IfModule> wrap should produce no warn-level logs; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn filesmatch_contained_directive_currently_applies_globally() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(
+                tmp.path(),
+                "<FilesMatch \"\\.php$\">\nHeader set X-Foo bar\n</FilesMatch>\n",
+            );
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.header_rules.len(), 1);
+            assert_eq!(
+                count_at_level(log::Level::Warn),
+                0,
+                "<FilesMatch> wrap should produce no warn-level logs; got: {:?}",
+                captured()
+            );
+            assert!(
+                has_log_at_level(log::Level::Debug, "<FilesMatch"),
+                "expected a debug log about <FilesMatch> container; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn recognized_unsupported_directive_no_warn() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "php_flag display_errors off\n");
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(
+                count_at_level(log::Level::Warn),
+                0,
+                "php_flag should produce no warn-level log; got: {:?}",
+                captured()
+            );
+            assert!(
+                has_log_at_level(log::Level::Debug, "php_flag"),
+                "expected debug log for php_flag; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn unknown_directive_still_warns() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "TotallyMadeUpDirective foo\n");
+            let _ = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert!(
+                has_log_at_level(log::Level::Warn, "TotallyMadeUpDirective"),
+                "genuinely unknown directive should still warn; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn addtype_strips_trailing_semicolons() {
+        // Real-world htaccess files sometimes use semicolons after
+        // extensions (`AddType ... xls;`). Apache itself stores them
+        // literally and the extension never matches — same as the
+        // pre-fix behaviour here. We strip them so the mapping works.
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(
+            tmp.path(),
+            "AddType application/vnd.ms-excel xls;\n",
+        );
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert!(
+            cfg.add_types
+                .iter()
+                .any(|(e, m)| e == "xls" && m == "application/vnd.ms-excel"),
+            "expected ('xls', 'application/vnd.ms-excel') in add_types; got {:?}",
+            cfg.add_types,
+        );
+        assert!(
+            !cfg.add_types.iter().any(|(e, _)| e == "xls;"),
+            "extension should be stripped of trailing semicolon"
+        );
+    }
+
+    #[test]
+    fn parser_robustness_real_world_fixture() {
+        let fixture = r#"
+# General Apache settings
+Options SymLinksIfOwnerMatch
+DirectorySlash Off
+RewriteEngine On
+
+<FilesMatch "\.php$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-cache"
+    </IfModule>
+</FilesMatch>
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.+)\.(\d+)\.(js|css)$ $1.$3 [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule . index.php [QSA,L]
+
+php_flag    display_errors          off
+php_value   max_input_vars          16384
+
+<IfModule mod_headers.c>
+    Header set X-UA-Compatible "IE=edge"
+    Header set X-Content-Type-Options "nosniff"
+    Header setifempty X-FRAME-OPTIONS "deny"
+</IfModule>
+
+<IfModule mod_mime.c>
+    AddType application/json                            json map topojson
+    AddType application/vnd.ms-excel                    xls;
+    AddType application/vnd.oasis.opendocument.spreadsheet  ods;
+    AddCharset utf-8 .atom \
+                     .css \
+                     .js
+</IfModule>
+
+AddDefaultCharset utf-8
+
+<IfModule mod_alias.c>
+    RedirectMatch 204 /favicon.ico$
+</IfModule>
+
+<IfModule mod_expires.c>
+    ExpiresActive on
+    ExpiresDefault "access plus 1 month"
+    ExpiresByType text/css "access plus 1 year"
+</IfModule>
+
+FileETag None
+"#;
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            std::fs::write(tmp.path().join(".htaccess"), fixture).unwrap();
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+
+            // Supported directives all parsed.
+            assert!(cfg.rewrite_engine, "RewriteEngine On");
+            assert_eq!(
+                cfg.rewrite_rules.len(),
+                2,
+                "expected 2 RewriteRules; got {:?}",
+                cfg.rewrite_rules
+            );
+            // 4 Header rules: Cache-Control (inside FilesMatch — applies globally for now),
+            // X-UA-Compatible, X-Content-Type-Options, X-FRAME-OPTIONS.
+            assert_eq!(
+                cfg.header_rules.len(),
+                4,
+                "expected 4 Header rules; got {}",
+                cfg.header_rules.len()
+            );
+            // AddType including the `xls;` typo case.
+            assert!(
+                cfg.add_types.iter().any(|(e, _)| e == "xls"),
+                "AddType xls; should strip to 'xls'"
+            );
+            assert!(
+                cfg.add_types.iter().any(|(e, _)| e == "json"),
+                "AddType json present"
+            );
+            assert_eq!(cfg.add_default_charset.as_deref(), Some("utf-8"));
+
+            // The critical assertion: ZERO warn-level entries.
+            let warns: Vec<_> = captured()
+                .into_iter()
+                .filter(|e| e.level == log::Level::Warn)
+                .collect();
+            assert!(
+                warns.is_empty(),
+                "expected zero warn-level logs; got {} warns: {:?}",
+                warns.len(),
+                warns,
+            );
+        });
     }
 }

@@ -37,7 +37,6 @@ entry rather than leaving a crossed-out line here.
 - `AuthDigest` for digest auth.
 - `RewriteBase`, `RewriteMap`.
 - More `RewriteRule` flags: `[F]`, `[G]`, `[NC]`, `[P]`, `[E]`.
-- `<Files>`, `<FilesMatch>`, `<Directory>`, `<IfModule>` blocks.
 
 ### CGI
 
@@ -85,6 +84,22 @@ entry rather than leaving a crossed-out line here.
 - **Regex named-capture placeholders (`%{NAME}r`).** Refers to
   named captures from rewrite rules. Requires rewrite engine
   refactor. Subproject #6.
+- **`<FilesMatch>` / `<Files>` / `<Directory>` per-file scoping** of
+  contained Header / Rewrite rules. Recognized as containers today
+  (no warns), but contained rules apply globally. Sub-project B of
+  the htaccess robustness roadmap.
+- **`RedirectMatch <status> <regex> <to>`** — regex-based Redirect.
+  Sub-project C.
+- **`mod_expires`** (`ExpiresActive`, `ExpiresDefault`,
+  `ExpiresByType "access plus N <units>"`) emitting `Cache-Control:
+  max-age=...` + `Expires:` headers. Sub-project D.
+- **`<If "expression">` evaluator** — needs the mod_headers
+  subproject #5 (`expr=`) evaluator first.
+- **`SetEnv` / `SetEnvIf` / `SetEnvIfNoCase` directives** — needs
+  the env-var system (mod_headers subproject #4).
+- **`RequestHeader` directive** — modifies request headers (different
+  from `Header` which modifies responses). Adjacent to mod_headers
+  subproject #4.
 
 ## Not yet supported
 
