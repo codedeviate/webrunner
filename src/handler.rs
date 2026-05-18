@@ -109,11 +109,13 @@ pub async fn handle_request(
     let mut authenticated_user: Option<String> = None;
     // Redirect/Rewrite
     let mut response = match apply_rewrites(path_str, query, &htaccess) {
-        RewriteResult::Redirect { status, location } => Response::builder()
-            .status(status)
-            .header(header::LOCATION, location)
-            .body(Body::empty())
-            .unwrap(),
+        RewriteResult::Redirect { status, location } => {
+            let mut builder = Response::builder().status(status);
+            if let Some(loc) = location {
+                builder = builder.header(header::LOCATION, loc);
+            }
+            builder.body(Body::empty()).unwrap()
+        }
         RewriteResult::Rewrite(new_path) => {
             let new_rel = new_path.trim_start_matches('/');
             match safe_join(&state.root, new_rel) {

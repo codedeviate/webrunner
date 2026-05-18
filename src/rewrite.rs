@@ -7,8 +7,10 @@ pub enum RewriteResult {
     None,
     /// Internal rewrite — serve this new path instead
     Rewrite(String),
-    /// External redirect — send this status + Location header
-    Redirect { status: u16, location: String },
+    /// External redirect. `location: None` produces a response
+    /// without a `Location` header — used by `RedirectMatch`
+    /// status-only forms (204, 410, 4xx).
+    Redirect { status: u16, location: Option<String> },
 }
 
 /// Apply all Redirect directives and then RewriteRules from the config.
@@ -22,7 +24,7 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
             } else {
                 rule.to.clone()
             };
-            return RewriteResult::Redirect { status: rule.status, location };
+            return RewriteResult::Redirect { status: rule.status, location: Some(location) };
         }
     }
 
@@ -82,7 +84,7 @@ pub fn apply_rewrites(path: &str, query: &str, cfg: &HtaccessConfig) -> RewriteR
             let r_flag = rule.flags.iter().find(|f| f.starts_with("R"));
             if let Some(r) = r_flag {
                 let status = r.trim_start_matches("R=").parse::<u16>().unwrap_or(302);
-                return RewriteResult::Redirect { status, location: subst };
+                return RewriteResult::Redirect { status, location: Some(subst) };
             }
 
             // [L] flag: stop after this rule (always stop for now since we return)
