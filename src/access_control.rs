@@ -35,15 +35,12 @@ pub enum IpMatcher {
     /// Matches any IP.
     All,
     /// IPv4 CIDR: `192.168.1.0/24`, or bare `192.168.1.1` (/32).
-    #[allow(dead_code)] // used in T4
     V4 { network: Ipv4Addr, prefix: u8 },
     /// IPv6 CIDR: `fe80::/10`, or bare `::1` (/128).
-    #[allow(dead_code)] // used in T4
     V6 { network: Ipv6Addr, prefix: u8 },
 }
 
 impl IpMatcher {
-    #[allow(dead_code)] // used in T4
     pub fn matches(&self, peer: IpAddr) -> bool {
         match (self, peer) {
             (IpMatcher::All, _) => true,
@@ -58,7 +55,6 @@ impl IpMatcher {
     }
 }
 
-#[allow(dead_code)] // used in T4 via IpMatcher::matches
 fn ipv4_in_cidr(network: Ipv4Addr, prefix: u8, peer: Ipv4Addr) -> bool {
     if prefix == 0 {
         return true;
@@ -72,7 +68,6 @@ fn ipv4_in_cidr(network: Ipv4Addr, prefix: u8, peer: Ipv4Addr) -> bool {
     n == p
 }
 
-#[allow(dead_code)] // used in T4 via IpMatcher::matches
 fn ipv6_in_cidr(network: Ipv6Addr, prefix: u8, peer: Ipv6Addr) -> bool {
     if prefix == 0 {
         return true;
@@ -125,7 +120,6 @@ pub fn parse_ip_matcher(s: &str) -> Result<IpMatcher, String> {
 
 /// Evaluate access control for a peer IP. Returns `Ok(())` if
 /// access is allowed, or `Err(403)` if denied.
-#[allow(dead_code)] // called in T4
 pub fn evaluate(ac: &AccessControl, peer: IpAddr) -> Result<(), u16> {
     let has_modern = !ac.require_ip_allow.is_empty() || !ac.require_ip_deny.is_empty();
     let has_legacy = !ac.allow_from.is_empty() || !ac.deny_from.is_empty();
