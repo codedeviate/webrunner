@@ -1,3 +1,4 @@
+mod access_control;
 mod access_log;
 mod auth;
 mod cgi;
