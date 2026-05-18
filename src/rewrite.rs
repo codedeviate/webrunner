@@ -120,7 +120,7 @@ fn expand_cond_var(var: &str, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::htaccess::{HtaccessConfig, RedirectRule, RewriteRule, RewriteCond};
+    use crate::htaccess::{HtaccessConfig, RedirectRule, RewriteRule};
 
     fn cfg_with_redirect(status: u16, from: &str, to: &str) -> HtaccessConfig {
         let mut cfg = HtaccessConfig::default();

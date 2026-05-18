@@ -353,7 +353,6 @@ async fn run_cgi_handler(
 
     let env_vars = build_cgi_env(
         method,
-        req_path,
         query,
         script_path.to_str().unwrap_or(""),
         req_path,

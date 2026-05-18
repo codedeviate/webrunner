@@ -14,7 +14,6 @@ pub struct HtaccessConfig {
     pub add_default_charset: Option<String>,
     pub redirects: Vec<RedirectRule>,
     pub rewrite_engine: bool,
-    pub rewrite_conds: Vec<RewriteCond>,
     pub rewrite_rules: Vec<RewriteRule>,
     pub header_rules: Vec<crate::header_directive::HeaderRule>,
 }
@@ -54,7 +53,6 @@ impl Default for HtaccessConfig {
             add_default_charset: None,
             redirects: Vec::new(),
             rewrite_engine: false,
-            rewrite_conds: Vec::new(),
             rewrite_rules: Vec::new(),
             header_rules: Vec::new(),
         }

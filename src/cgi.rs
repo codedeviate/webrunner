@@ -85,7 +85,6 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 pub fn build_cgi_env(
     method: &str,
-    path: &str,
     query: &str,
     script_path: &str,
     script_name: &str,
