@@ -15,6 +15,7 @@ pub struct HtaccessConfig {
     pub add_types: Vec<AddTypeEntry>,
     pub add_default_charset: Option<String>,
     pub redirects: Vec<RedirectRule>,
+    pub redirect_matches: Vec<RedirectMatchRule>,
     pub rewrite_engine: bool,
     pub rewrite_rules: Vec<RewriteRule>,
     pub header_rules: Vec<crate::header_directive::HeaderRule>,
@@ -25,6 +26,16 @@ pub struct RedirectRule {
     pub status: u16,
     pub from: String,
     pub to: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RedirectMatchRule {
+    pub status: u16,
+    pub pattern: Regex,
+    /// Target URL template with `$N` capture substitution. `None`
+    /// for status-only forms (204, 4xx) that emit no `Location`
+    /// header.
+    pub to: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +84,7 @@ impl Default for HtaccessConfig {
             add_types: Vec::new(),
             add_default_charset: None,
             redirects: Vec::new(),
+            redirect_matches: Vec::new(),
             rewrite_engine: false,
             rewrite_rules: Vec::new(),
             header_rules: Vec::new(),
@@ -209,7 +221,6 @@ fn is_known_unsupported(tok: &str) -> bool {
             | "php_flag"
             | "php_value"
             | "fileetag"
-            | "redirectmatch"
             | "addencoding"
             | "addcharset"
             | "addoutputfilterbytype"
@@ -415,6 +426,63 @@ fn apply_htaccess(cfg: &mut HtaccessConfig, content: &str, file_path: &str) {
                     continue;
                 };
                 cfg.redirects.push(RedirectRule { status, from, to });
+            }
+            "redirectmatch" => {
+                // RedirectMatch [status] <regex> [URL]
+                // - 2 args: <regex> <URL>             (status defaults to 302)
+                // - 3 args, first is status: <status> <regex> <URL>
+                //   or <status> <regex> (status-only for 204/4xx).
+                let (status, pattern_raw, to) = if tokens.len() < 3 {
+                    log::warn!(
+                        "[.htaccess] {}:{}: malformed RedirectMatch: too few arguments",
+                        file_path,
+                        line_no + 1
+                    );
+                    continue;
+                } else {
+                    let parsed_status: Option<u16> = match tokens[1].to_ascii_lowercase().as_str() {
+                        "permanent" => Some(301),
+                        "temp" | "temporary" => Some(302),
+                        "seeother" => Some(303),
+                        "gone" => Some(410),
+                        other => other.parse::<u16>().ok(),
+                    };
+                    if let Some(s) = parsed_status {
+                        let pat = tokens[2].to_string();
+                        let to = tokens.get(3).map(|s| s.to_string());
+                        (s, pat, to)
+                    } else {
+                        (302u16, tokens[1].to_string(), Some(tokens[2].to_string()))
+                    }
+                };
+
+                // 3xx requires a target URL. Status-only forms are
+                // valid for 204 or any 4xx.
+                let status_allows_no_to = status == 204 || (400..500).contains(&status);
+                if to.is_none() && !status_allows_no_to {
+                    log::warn!(
+                        "[.htaccess] {}:{}: malformed RedirectMatch: missing URL for status {}",
+                        file_path,
+                        line_no + 1,
+                        status
+                    );
+                    continue;
+                }
+
+                match Regex::new(&pattern_raw) {
+                    Ok(re) => cfg.redirect_matches.push(RedirectMatchRule {
+                        status,
+                        pattern: re,
+                        to,
+                    }),
+                    Err(e) => log::warn!(
+                        "[.htaccess] {}:{}: malformed RedirectMatch regex '{}': {}",
+                        file_path,
+                        line_no + 1,
+                        pattern_raw,
+                        e
+                    ),
+                }
             }
             "rewriteengine" => {
                 cfg.rewrite_engine = tokens.get(1)
@@ -1150,5 +1218,77 @@ FileETag None
         assert_eq!(scope.len(), 1);
         assert!(scope[0].is_match("style.css"));
         assert!(!scope[0].is_match("style.js"));
+    }
+
+    #[test]
+    fn parse_redirectmatch_three_arg_with_status() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "RedirectMatch 301 ^/old/(.*)$ /new/$1\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.redirect_matches.len(), 1);
+        let rule = &cfg.redirect_matches[0];
+        assert_eq!(rule.status, 301);
+        assert_eq!(rule.pattern.as_str(), "^/old/(.*)$");
+        assert_eq!(rule.to.as_deref(), Some("/new/$1"));
+    }
+
+    #[test]
+    fn parse_redirectmatch_two_arg_default_302() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "RedirectMatch ^/old/(.*)$ /new/$1\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.redirect_matches.len(), 1);
+        assert_eq!(cfg.redirect_matches[0].status, 302);
+        assert_eq!(cfg.redirect_matches[0].to.as_deref(), Some("/new/$1"));
+    }
+
+    #[test]
+    fn parse_redirectmatch_status_only_204() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "RedirectMatch 204 /favicon.ico$\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.redirect_matches.len(), 1);
+        let rule = &cfg.redirect_matches[0];
+        assert_eq!(rule.status, 204);
+        assert!(rule.to.is_none(), "status-only 204 should have no target URL");
+    }
+
+    #[test]
+    fn parse_redirectmatch_symbolic_permanent() {
+        let tmp = TempDir::new().unwrap();
+        write_htaccess(tmp.path(), "RedirectMatch permanent ^/old$ /new\n");
+        let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+        assert_eq!(cfg.redirect_matches.len(), 1);
+        assert_eq!(cfg.redirect_matches[0].status, 301);
+    }
+
+    #[test]
+    fn parse_redirectmatch_malformed_regex_warns() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "RedirectMatch ^[invalid /to\n");
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.redirect_matches.len(), 0);
+            assert!(
+                has_log_at_level(log::Level::Warn, "malformed RedirectMatch regex"),
+                "expected malformed-regex warn; got: {:?}",
+                captured()
+            );
+        });
+    }
+
+    #[test]
+    fn parse_redirectmatch_missing_to_for_3xx_warns() {
+        with_log_capture(|| {
+            let tmp = TempDir::new().unwrap();
+            write_htaccess(tmp.path(), "RedirectMatch 301 /old$\n");
+            let cfg = parse_htaccess_for_path(tmp.path(), tmp.path()).unwrap();
+            assert_eq!(cfg.redirect_matches.len(), 0);
+            assert!(
+                has_log_at_level(log::Level::Warn, "missing URL for status 301"),
+                "expected missing-URL warn; got: {:?}",
+                captured()
+            );
+        });
     }
 }

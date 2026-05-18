@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- `RedirectMatch <status> <regex> <to>` directive in `.htaccess`,
+  with `$1`, `$2`, … capture-group substitution in the target URL.
+  Status defaults to 302; symbolic statuses `permanent`, `temp`,
+  `temporary`, `seeother`, `gone` are accepted (same set as
+  `Redirect`). Status-only forms with no target URL are supported
+  for codes that omit `Location` (204, 410, and 4xx in general)
+  — useful for silencing favicon-404 spam with
+  `RedirectMatch 204 /favicon.ico$`.
+
+### Changed
+
+- `RewriteResult::Redirect.location` is now `Option<String>` —
+  `None` produces a response without a `Location` header (used
+  by `RedirectMatch` status-only forms). Existing
+  `Redirect`/`RewriteRule [R]` paths continue to produce
+  `Some(...)`. Internal API change; no observable difference for
+  pre-existing configs.
+
 ## [0.7.0] - 2026-05-18
 
 ### Added
@@ -43,7 +63,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Backslash
   line-continuation (`\` at end of line) joins as expected.
   Common Apache directives webrunner doesn't implement (`php_flag`,
-  `php_value`, `FileETag`, `RedirectMatch`, `AddEncoding`,
+  `php_value`, `FileETag`, `AddEncoding`,
   `AddCharset`, `AddOutputFilterByType`, `SetEnv`, `SetEnvIf`,
   `SetEnvIfNoCase`, `RequestHeader`, `ExpiresActive`,
   `ExpiresDefault`, `ExpiresByType`, `DirectorySlash`) are now
