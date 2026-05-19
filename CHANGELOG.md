@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-19
+
 ### Added
 
 - `RedirectMatch <status> <regex> <to>` directive in `.htaccess`,
@@ -51,6 +53,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - `[F]` (Forbidden, 403) and `[G]` (Gone, 410) flags on
   `RewriteRule`. Both produce status responses with no
   `Location` header.
+- Colorized `--examples` output (yellow section headers, cyan
+  command lines, dimmed notes). Style mirrors `codedeviate/recon`
+  for cross-repo uniformity. Coverage expanded to include every
+  feature shipped in this release plus HSTS, mod_headers, and
+  `<FilesMatch>` scoping recipes.
+- `man/webrunner.1` — hand-written groff man page covering all
+  CLI flags, supported `.htaccess` directives, files, exit status,
+  and examples. Distributors should install under
+  `share/man/man1/`.
+- README header gets a shields.io badge row (GitHub, latest
+  release, crates.io, Homebrew tap, MIT license, Rust edition +
+  MSRV). Style mirrors `codedeviate/loganalyzer`.
 
 ### Changed
 
