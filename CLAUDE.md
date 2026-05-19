@@ -83,6 +83,28 @@ implementing commit, and remove it from `OUT-OF-SCOPE.md`.
 Don't silently drop ideas. If it's worth saying "no, not yet" out loud, it's
 worth a line in `OUT-OF-SCOPE.md`.
 
+## README badges
+
+`README.md` carries a shields.io badge header (GitHub, latest release,
+crates.io, Homebrew tap, license, Rust edition + MSRV). Keep it in sync
+with the project state:
+
+- **Latest release** is hardcoded — bump in the release checklist
+  (step 3).
+- **License (MIT)** is hardcoded — update if `Cargo.toml::license`
+  changes.
+- **Rust edition + MSRV** is hardcoded — update if `Cargo.toml::edition`
+  or `Cargo.toml::rust-version` changes.
+- **GitHub / Homebrew tap** badges are hardcoded paths — update if
+  the repo or tap location moves.
+- **crates.io** badge is dynamic (shields.io reads the registry); no
+  manual maintenance needed.
+
+If you change any field above in `Cargo.toml`, update the matching
+badge in `README.md` in the same commit. The badge header style mirrors
+`codedeviate/loganalyzer` for cross-repo uniformity — don't drift
+without a reason.
+
 ## Build, test, run
 
 ```sh
