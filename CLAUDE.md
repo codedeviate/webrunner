@@ -26,6 +26,17 @@ those out explicitly in the changelog.
 The version lives in `Cargo.toml` and **must** be bumped in the same commit
 that tags a release.
 
+**Tagging implies a GitHub release.** When you push a `vX.Y.Z` tag, immediately
+create the matching GitHub release:
+
+```sh
+gh release create vX.Y.Z --generate-notes
+```
+
+This is step 9 of the release checklist below — don't skip it. A tag without a
+release leaves the GitHub Releases page out of sync with tag history and hides
+the version from anyone browsing the repo's front page.
+
 ## Commits
 
 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/):
