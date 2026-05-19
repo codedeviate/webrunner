@@ -44,6 +44,7 @@ log = "0.4"
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 flate2 = "1"
 brotli = "7"
+colored = "2"
 
 [dev-dependencies]
 tempfile = "3"
