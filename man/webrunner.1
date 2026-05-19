@@ -1,0 +1,312 @@
+.TH WEBRUNNER 1 "May 2026" "webrunner 0.7.0" "User Commands"
+.SH NAME
+webrunner \- zero-config development web server with CGI and .htaccess support
+.SH SYNOPSIS
+.B webrunner
+.RI [ OPTIONS ]
+.RI [ ROOT ]
+.SH DESCRIPTION
+.B webrunner
+is a single-binary Rust development web server. Point it at a directory and
+you get static files, directory listings, classic CGI scripts (Perl, PHP,
+TypeScript/JavaScript via
+.BR bun ),
+URL rewriting, basic auth, custom error pages, and self-signed HTTPS \(em
+all driven by familiar Apache-style
+.B .htaccess
+files.
+
+Built for local development and quick prototyping. Not a production server.
+
+The
+.I ROOT
+positional argument selects the document root; it is equivalent to
+.BR --root .
+The default is the current working directory.
+.SH OPTIONS
+.TP
+.BI -p\fR,\fP\ --port " PORT"
+HTTP port. Default
+.BR 8080 .
+.TP
+.B --https
+Enable HTTPS. Auto-generates a self-signed certificate cached in
+.BR ~/.config/webrunner/
+on first run.
+.TP
+.BI --https-port " PORT"
+HTTPS port. Default
+.BR 8443 .
+.TP
+.BI --cert " PATH"
+Path to TLS certificate (PEM). Requires
+.BR --key .
+Implies
+.BR --https .
+.TP
+.BI --key " PATH"
+Path to TLS private key (PEM). Requires
+.BR --cert .
+.TP
+.B --no-index
+Disable directory listings; return 403 for directory requests that have no
+matching
+.BR DirectoryIndex .
+.TP
+.BI --root " DIR"
+Document root. Also accepted as a positional argument. Path is canonicalised
+at startup.
+.TP
+.BI --bind " ADDR"
+Bind address(es). Accepts IPv4 and IPv6 literals; comma-separated and
+repeatable. Default
+.BR 0.0.0.0,:: .
+.TP
+.BI --cgi " EXT[,EXT...]"
+Extra extensions to execute as CGI. The
+.B pl
+and
+.B php
+extensions are always CGI; this flag enables
+.B js
+and
+.B ts
+via
+.BR bun .
+.TP
+.BI --no-cgi " EXT[,EXT...]"
+Disable always-on CGI for the listed extensions
+.RB ( pl ,
+.BR php ).
+Mutually exclusive with
+.B --cgi
+on the same extension.
+.TP
+.BI --cgi-timeout " SECS"
+CGI script timeout in seconds. Default
+.BR 30 .
+A value of
+.B 0
+disables the limit.
+.TP
+.BI --log-level " LEVEL"
+Verbosity:
+.BR off ,
+.BR warn ,
+.BR info ,
+.BR debug .
+Default
+.BR info .
+.B debug
+surfaces recognized-but-unsupported
+.B .htaccess
+directives.
+.TP
+.BI --log " PATH"
+Access log file path. Use
+.B -
+for stdout. Combined Log Format, one line per request.
+.TP
+.BI --compression " ON|OFF"
+Brotli / gzip compression for text-shaped static responses. Default
+.BR on .
+Applies to
+.BR text/* ,
+.BR application/json ,
+.BR application/javascript ,
+.BR image/svg+xml ,
+.BR application/wasm .
+Responses under 256 bytes and
+.B Range
+requests are served uncompressed.
+.TP
+.BI --hsts " SECS"
+Send
+.B Strict-Transport-Security
+on HTTPS responses with this
+.BR max-age .
+Default: header not sent.
+.TP
+.B --hsts-include-subdomains
+Add the
+.B includeSubDomains
+directive to the HSTS header. Requires
+.BR --hsts .
+.TP
+.B --hsts-preload
+Add the
+.B preload
+directive to the HSTS header. Requires
+.BR --hsts .
+.TP
+.B --examples
+Print a rich, colorized usage cookbook and exit.
+.TP
+.B -h, --help
+Show help and exit.
+.TP
+.B -V, --version
+Show version and exit.
+.SH ".HTACCESS"
+A practical subset of Apache's
+.B .htaccess
+is supported. Deeper files override shallower ones; unknown directives are
+skipped with a warning on stderr (use
+.B --log-level debug
+to see recognized-but-unsupported entries).
+
+Supported directives:
+.IP \[bu] 2
+.B DirectoryIndex
+\(em comma-separated index file list.
+.IP \[bu]
+.B Options
+.RB \(+- Indexes
+\(em toggle directory listings.
+.IP \[bu]
+.B ErrorDocument
+\(em custom error pages by status code.
+.IP \[bu]
+.BR AddType ,
+.B AddDefaultCharset
+\(em MIME-type overrides.
+.IP \[bu]
+.B Redirect
+(301 / 302) and
+.B RedirectMatch
+(regex with capture substitution; status-only forms for 204 / 4xx).
+.IP \[bu]
+.BR RewriteEngine ,
+.BR RewriteRule ,
+.BR RewriteCond ,
+.B RewriteBase
+\(em URL rewriting. Flags:
+.BR [QSA] ,
+.BR [L] ,
+.BR [R] ,
+.BR [NC] ,
+.BR [F] ,
+.BR [G] .
+.IP \[bu]
+.B AuthType Basic
+with
+.BR .htpasswd
+files supporting bcrypt
+.RB ( $2y$\(rs ),
+SHA-1
+.RB ( {SHA}\(rs ),
+and Apache MD5
+.RB ( $apr1$\(rs ).
+Authorization via
+.BR "Require valid-user" ,
+.BR "Require user <name>" ,
+.BR "Require ip <CIDR>" ,
+.BR "Require not ip <CIDR>" .
+.IP \[bu]
+.BR Allow ,
+.BR Deny ,
+.B Order
+\(em legacy Apache 2.2 IP-based access control.
+.IP \[bu]
+.BR Header
+(set / setifempty / add / append / merge / unset / echo / edit / edit*) with
+.B always|onsuccess
+conditions and placeholders
+.RB ( %t ,
+.BR %D ,
+.BR %l ,
+.BR %s ,
+.BR %H ,
+.BR %m ,
+.BR %U ).
+.IP \[bu]
+.BR ExpiresActive ,
+.BR ExpiresDefault ,
+.B ExpiresByType
+\(em
+.BR Cache-Control
+and
+.B Expires
+headers per response MIME type. Time-spec:
+.BR "access plus N <unit>" .
+.IP \[bu]
+.B <IfModule>
+blocks pass through (their contents always apply).
+.B <FilesMatch "regex">
+and
+.B <Files "glob">
+scope contained
+.BR Header ,
+.BR RewriteRule ,
+auth, and
+.B AddType
+directives to files whose basename matches the pattern.
+.SH FILES
+.TP
+.B ~/.config/webrunner/cert.pem
+Self-signed certificate cached on first
+.B --https
+run.
+.TP
+.B ~/.config/webrunner/key.pem
+Matching private key.
+.TP
+.B .htaccess
+Per-directory configuration file; merged from document root down to the
+target directory.
+.SH "EXIT STATUS"
+.TP
+.B 0
+Clean shutdown after
+.B Ctrl+C
+or
+.BR SIGTERM .
+.TP
+.B 1
+Startup error (bad arguments, port already in use, missing certificate
+file, etc.). Errors are reported to stderr.
+.SH EXAMPLES
+.PP
+Serve the current directory on
+.BR http://localhost:8080 :
+.PP
+.in +4n
+.EX
+webrunner
+.EE
+.in
+.PP
+HTTPS on
+.B :8443
+with a self-signed certificate cached for next time:
+.PP
+.in +4n
+.EX
+webrunner --https
+.EE
+.in
+.PP
+Restrict to loopback and write an access log:
+.PP
+.in +4n
+.EX
+webrunner --bind 127.0.0.1,::1 --log /var/log/webrunner.access.log
+.EE
+.in
+.PP
+Run
+.B "webrunner --examples"
+for a full colorized cookbook.
+.SH "SEE ALSO"
+.BR htpasswd (1),
+.BR apache2 (8),
+the project README for the full feature list and the supported
+.B .htaccess
+directive table.
+.SH AUTHOR
+Thomas Björk
+.RB < codedv8@gmail.com >.
+.PP
+Source and issue tracker:
+.UR https://github.com/codedeviate/webrunner
+.UE

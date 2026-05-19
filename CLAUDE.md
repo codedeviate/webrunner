@@ -83,6 +83,28 @@ implementing commit, and remove it from `OUT-OF-SCOPE.md`.
 Don't silently drop ideas. If it's worth saying "no, not yet" out loud, it's
 worth a line in `OUT-OF-SCOPE.md`.
 
+## Man page
+
+`man/webrunner.1` is the canonical man page. It is hand-written (groff /
+troff format) and **must be kept in sync with the CLI** — any change to
+`Cargo.toml::version`, `src/cli.rs` flags, or the `.htaccess` directive
+list requires a matching edit in `man/webrunner.1`. Verify the rendered
+output looks right after editing:
+
+```sh
+man ./man/webrunner.1   # macOS / BSD
+groff -mandoc -Tutf8 ./man/webrunner.1 | less    # Linux
+```
+
+The `.TH` header at the top carries the version (`webrunner X.Y.Z`) and
+date — bump both alongside the `Cargo.toml` version and CHANGELOG date
+in the release commit.
+
+Distributors (Homebrew, distro packagers) install this file under
+`share/man/man1/`. Don't move or rename it without coordinating with
+the Homebrew formula in
+[`codedeviate/homebrew-cli`](https://github.com/codedeviate/homebrew-cli).
+
 ## README badges
 
 `README.md` carries a shields.io badge header (GitHub, latest release,
@@ -136,14 +158,16 @@ uploading — run it after touching `Cargo.toml` metadata fields.
 3. Bump the `Latest release` badge version in `README.md` to match
    `Cargo.toml` (the badge is hardcoded — same convention as
    `codedeviate/loganalyzer`).
-4. Convert `[Unreleased]` in `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD`; add a
+4. Bump the `.TH` header in `man/webrunner.1` — both the version
+   (`webrunner X.Y.Z`) and the date (`"Month YYYY"`).
+5. Convert `[Unreleased]` in `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD`; add a
    fresh empty `[Unreleased]`.
-5. Move any newly-shipped items out of `OUT-OF-SCOPE.md` into the changelog
+6. Move any newly-shipped items out of `OUT-OF-SCOPE.md` into the changelog
    entry.
-6. Single commit: `chore(release): vX.Y.Z`.
-7. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-8. `gh release create vX.Y.Z --generate-notes`.
-9. `cargo publish` (when ready for crates.io).
-10. Update the Homebrew formula in the
+7. Single commit: `chore(release): vX.Y.Z`.
+8. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+9. `gh release create vX.Y.Z --generate-notes`.
+10. `cargo publish` (when ready for crates.io).
+11. Update the Homebrew formula in the
    [`codedeviate/homebrew-cli`](https://github.com/codedeviate/homebrew-cli)
    tap (bump `url`, `sha256`, and `version` to match the new tag).
