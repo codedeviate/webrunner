@@ -151,6 +151,11 @@ cargo fmt                # format
 `cargo publish --dry-run --allow-dirty` validates crates.io metadata without
 uploading — run it after touching `Cargo.toml` metadata fields.
 
+When building the release target, **skip the debug target**. Don't run a bare
+`cargo build` alongside `cargo build --release` to "also check debug" — if a
+debug build is needed, it will be built separately or the user will explicitly
+request it.
+
 ## Code style notes
 
 - Modules are organised by concern, not by layer. Adding a new feature usually
