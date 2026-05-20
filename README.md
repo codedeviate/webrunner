@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?logo=opensourceinitiative)](LICENSE)
 [![Rust edition 2021](<https://img.shields.io/badge/rust-2021_edition_(MSRV_1.75)-CE422B?logo=rust>)](https://www.rust-lang.org)
 <br/>
-[![Latest release](https://img.shields.io/badge/release-v0.8.0-blue?logo=semanticrelease)](https://github.com/codedeviate/webrunner/releases)
+[![Latest release](https://img.shields.io/github/v/release/codedeviate/webrunner?logo=semanticrelease&label=release&color=blue)](https://github.com/codedeviate/webrunner/releases)
 [![crates.io](https://img.shields.io/badge/crates.io-webrunner-fc8d62?logo=rust)](https://crates.io/crates/webrunner)
 [![Homebrew](https://img.shields.io/badge/homebrew-codedeviate%2Fcli%2Fwebrunner-fbb040?logo=homebrew)](https://github.com/codedeviate/homebrew-cli)
 
@@ -39,7 +39,7 @@ Built for local development and quick prototyping. Not a production server.
     authorization (basic auth)
   - `Allow from` / `Deny from` / `Order` (Apache 2.2 IP-based
     access control) and `Require ip <CIDR>` / `Require not ip
-    <CIDR>` (Apache 2.4 syntax)
+<CIDR>` (Apache 2.4 syntax)
   - `RewriteEngine`, `RewriteRule`, `RewriteCond` (incl. flags
     `[QSA]`, `[L]`, `[R]`, `[NC]`, `[F]`, `[G]`), `RewriteBase`
   - `AuthType Basic` with `.htpasswd` (bcrypt, SHA-1, Apache MD5)
@@ -246,8 +246,7 @@ Scripts receive standard CGI/1.1 environment variables (`REQUEST_METHOD`,
 headers + blank line + body; use `Status: 404 Not Found` to set a non-200
 response.
 
-CGI scripts that don't return within `--cgi-timeout` seconds (default
-30) are killed and the client receives a 504. Pass `--cgi-timeout 0`
+CGI scripts that don't return within `--cgi-timeout` seconds (default 30) are killed and the client receives a 504. Pass `--cgi-timeout 0`
 to disable the limit while debugging a slow script interactively.
 
 ### Executing server-side JavaScript / TypeScript
@@ -352,18 +351,18 @@ cargo build --release
 
 The crate is organised by concern:
 
-| Module          | Responsibility                                        |
-| --------------- | ----------------------------------------------------- |
-| `cli`           | Command-line parsing and validation                   |
-| `server`        | HTTP/HTTPS listeners and graceful shutdown            |
-| `handler`       | Request dispatch and `.htaccess` evaluation           |
-| `static_files`  | Static file serving and directory listings            |
-| `cgi`           | CGI/1.1 process spawning and response parsing         |
-| `htaccess`      | `.htaccess` parser and merger                         |
-| `rewrite`       | `RewriteRule` / `RewriteCond` engine                  |
-| `auth`          | HTTP Basic auth with `.htpasswd` verification         |
-| `mime`          | MIME-type lookup                                      |
-| `tls`           | Self-signed cert generation and loading               |
+| Module         | Responsibility                                |
+| -------------- | --------------------------------------------- |
+| `cli`          | Command-line parsing and validation           |
+| `server`       | HTTP/HTTPS listeners and graceful shutdown    |
+| `handler`      | Request dispatch and `.htaccess` evaluation   |
+| `static_files` | Static file serving and directory listings    |
+| `cgi`          | CGI/1.1 process spawning and response parsing |
+| `htaccess`     | `.htaccess` parser and merger                 |
+| `rewrite`      | `RewriteRule` / `RewriteCond` engine          |
+| `auth`         | HTTP Basic auth with `.htpasswd` verification |
+| `mime`         | MIME-type lookup                              |
+| `tls`          | Self-signed cert generation and loading       |
 
 ## Caveats
 
