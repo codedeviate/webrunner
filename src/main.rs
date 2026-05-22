@@ -1,3 +1,11 @@
+//! `webrunner` is a zero-config development web server with CGI and
+//! `.htaccess` support.
+//!
+//! This crate ships a single binary; see the
+//! [project README](https://github.com/codedeviate/webrunner#readme)
+//! for the full feature overview, CLI reference, `.htaccess` directive
+//! list, and usage examples.
+
 mod access_control;
 mod access_log;
 mod auth;

@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-05-22
+
+### Changed
+
+- `src/main.rs` now carries a crate-level doc comment linking to the
+  project README. docs.rs auto-publishes documentation when a release
+  is pushed to crates.io, and previously landed on an empty page for
+  a binary-only crate; the link gives readers a one-click jump to the
+  feature overview and `.htaccess` reference.
+
 ## [0.8.0] - 2026-05-19
 
 ### Added
